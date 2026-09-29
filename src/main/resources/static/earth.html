@@ -642,7 +642,11 @@
           const r = { x: o.cart.pos.x - ePos.x, y: -(o.cart.pos.y - ePos.y), z: o.cart.pos.z - ePos.z };
           const v = { x: o.cart.vel.x - eVel.x, y: -(o.cart.vel.y - eVel.y), z: o.cart.vel.z - eVel.z };
           const kep = cartesianToKepElements(r, v, GM_EARTH);
-          const pts = kep && kepOrbitPoints(kep);
+          let pts = kep && kepOrbitPoints(kep);
+          if (!pts) {
+            console.warn(`[earth.html] derived kep failed for ${o.name ?? o.id}, falling back to server kep`, { r, v, kep, serverKep: o.kep });
+            pts = o.kep && kepOrbitPoints(o.kep);
+          }
           if (pts) {
             const geo = new THREE.BufferGeometry().setFromPoints(pts);
             orbitGroup.add(new THREE.LineLoop(geo, new THREE.LineBasicMaterial({
