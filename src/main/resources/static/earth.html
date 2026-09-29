@@ -361,6 +361,7 @@
     const SCALE  = 1.0 / (1000 * KM); // Three.js units per meter (1 unit = 1000 km)
     const EARTH_RADIUS_FALLBACK = 6371000; // meters, used until telemetry arrives
     const EARTH_ID = 4; // Fixed object ID for Earth in the KSD object model
+    const HIDDEN_TYPES = new Set(['spacecenter']); // ground sites, not orbiting spacecraft
 
     // ── Renderer setup ────────────────────────────────────────────────────────
     const container = document.getElementById('canvas-wrap');
@@ -782,7 +783,9 @@
       }
 
       earthObj = objects.find(o => o.id === EARTH_ID) ?? null;
-      spacecraft = earthObj ? objects.filter(o => o.parentId === earthObj.id) : [];
+      spacecraft = earthObj
+        ? objects.filter(o => o.parentId === earthObj.id && !HIDDEN_TYPES.has((o.type ?? "").trim().toLowerCase()))
+        : [];
 
       if (earthObj && selectedId == null) selectedId = EARTH_MARKER_ID;
       if (selectedId !== EARTH_MARKER_ID && !spacecraft.some(o => o.id === selectedId)) {
