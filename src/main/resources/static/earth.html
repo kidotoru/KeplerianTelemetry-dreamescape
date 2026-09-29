@@ -579,7 +579,6 @@
       ensureEarthMesh(earthObj.radius);
 
       const ePos = earthObj.cart?.pos;
-      const eVel = earthObj.cart?.vel;
 
       spacecraft.forEach(o => {
         const isSelected = o.id === selectedId;
@@ -638,13 +637,28 @@
         }
 
         // ── Orbit line, derived from this object's own state relative to Earth ──
-        if (o.cart?.pos && o.cart?.vel && ePos && eVel) {
+        // Note: unlike cart.pos (heliocentric absolute, needs the Earth offset
+        // subtracted), cart.vel for a child of Earth is sent already relative
+        // to Earth — confirmed empirically: subtracting Earth's own velocity
+        // from e.g. ISS's raw vel gives ~27 km/s (nonsense for LEO), while
+        // using ISS's raw vel as-is gives ~7.65 km/s (correct).
+        if (o.cart?.pos && o.cart?.vel && ePos) {
           const r = { x: o.cart.pos.x - ePos.x, y: -(o.cart.pos.y - ePos.y), z: o.cart.pos.z - ePos.z };
-          const v = { x: o.cart.vel.x - eVel.x, y: -(o.cart.vel.y - eVel.y), z: o.cart.vel.z - eVel.z };
+          const v = { x: o.cart.vel.x, y: -o.cart.vel.y, z: o.cart.vel.z };
           const kep = cartesianToKepElements(r, v, GM_EARTH);
           let pts = kep && kepOrbitPoints(kep);
           if (!pts) {
-            console.warn(`[earth.html] derived kep failed for ${o.name ?? o.id}, falling back to server kep`, { r, v, kep, serverKep: o.kep });
+            const rMag = Math.hypot(r.x, r.y, r.z);
+            const vMag = Math.hypot(v.x, v.y, v.z);
+            const energy = (vMag * vMag) / 2 - GM_EARTH / rMag;
+            console.warn(
+              `[earth.html] derived kep failed for ${o.name ?? o.id}: ` +
+              `|r|=${rMag.toExponential(4)} m  |v|=${vMag.toExponential(4)} m/s  ` +
+              `energy=${energy.toExponential(4)}  kep=${JSON.stringify(kep)}  ` +
+              `raw pos=${JSON.stringify(o.cart.pos)} earthPos=${JSON.stringify(ePos)} ` +
+              `raw vel=${JSON.stringify(o.cart.vel)} ` +
+              `serverKep=${JSON.stringify(o.kep)}`
+            );
             pts = o.kep && kepOrbitPoints(o.kep);
           }
           if (pts) {
