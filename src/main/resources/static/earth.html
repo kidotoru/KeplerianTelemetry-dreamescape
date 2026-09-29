@@ -555,13 +555,6 @@
         new THREE.SphereGeometry(physRadius, 32, 32),
         new THREE.MeshBasicMaterial({ color: 0x2255aa })
       ));
-      // Atmosphere glow layers
-      [[1.02, 0.18], [1.08, 0.08], [1.18, 0.03]].forEach(([mult, op]) => {
-        earthMesh.add(new THREE.Mesh(
-          new THREE.SphereGeometry(physRadius * mult, 24, 24),
-          new THREE.MeshBasicMaterial({ color: 0x7eb8f7, transparent: true, opacity: op })
-        ));
-      });
       earthMesh.userData.objectId = EARTH_MARKER_ID;
       scene.add(earthMesh);
     }
