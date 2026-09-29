@@ -262,7 +262,6 @@
     }
 
     .body-label.lbl-selected { color: #3ddc84; }
-    .body-label.lbl-earth    { color: rgba(126,184,247,0.95); }
 
     /* ── Body position markers (constant screen size) ── */
     .body-marker {
@@ -277,7 +276,6 @@
     }
 
     .body-marker.marker-selected { border-color: #3ddc84; border-width: 2px; }
-    .body-marker.marker-earth    { border-color: rgba(126,184,247,0.95); width: 26px; height: 26px; }
   </style>
 </head>
 <body>
@@ -515,27 +513,6 @@
       updateScene();
     }
 
-    function makeEarthLabel(isSelected) {
-      const wrapper = document.createElement('div');
-      wrapper.style.pointerEvents = 'none';
-
-      const marker = document.createElement('div');
-      marker.className = 'body-marker marker-earth' + (isSelected ? ' marker-selected' : '');
-      marker.addEventListener('click', e => { e.stopPropagation(); selectObject(EARTH_MARKER_ID); });
-      wrapper.appendChild(marker);
-
-      const label = document.createElement('div');
-      label.className = 'body-label lbl-earth' + (isSelected ? ' lbl-selected' : '');
-      label.textContent = 'EARTH';
-      label.style.top = '18px';
-      label.addEventListener('click', e => { e.stopPropagation(); selectObject(EARTH_MARKER_ID); });
-      wrapper.appendChild(label);
-
-      const obj = new CSS2DObject(wrapper);
-      obj.position.set(0, 0, 0);
-      return obj;
-    }
-
     function updateScene() {
       clearGroup(orbitGroup);
       clearGroup(bodyGroup);
@@ -544,7 +521,6 @@
       if (!earthObj) return;
 
       ensureEarthMesh(earthObj.radius);
-      bodyGroup.add(makeEarthLabel(selectedId === EARTH_MARKER_ID));
 
       const ePos = earthObj.cart?.pos;
 
