@@ -360,6 +360,7 @@
     const EARTH_RADIUS_FALLBACK = 6371000; // meters, used until telemetry arrives
     const EARTH_ID = 4; // Fixed object ID for Earth in the KSD object model
     const HIDDEN_TYPES = new Set(['spacecenter']); // ground sites, not orbiting spacecraft
+    const GM_EARTH = 3.986004418e14; // Earth standard gravitational parameter, m^3/s^2
 
     // ── Renderer setup ────────────────────────────────────────────────────────
     const container = document.getElementById('canvas-wrap');
@@ -467,6 +468,61 @@
       return pts;
     }
 
+    // ── Cartesian state (Earth-relative) → Keplerian elements ────────────────
+    // The server's own `kep` field is expressed in Earth's tilted equatorial
+    // reference frame (KSD applies an axial-tilt rotation on top of it before
+    // it ever reaches this client), so it doesn't line up with `cart.pos`,
+    // which is already in the same world frame the markers are drawn in. To
+    // keep the orbit line glued to the marker regardless of that, derive the
+    // ellipse directly from the object's own relative position/velocity
+    // instead of trusting the server's kep values.
+    // r, v must be in the right-handed frame kepOrbitPoints() expects, i.e.
+    // Unreal (x, y, z) with y negated — see toThree()/icrfToThree() above.
+    function cartesianToKepElements(r, v, gm) {
+      const rMag = Math.hypot(r.x, r.y, r.z);
+      const vMag = Math.hypot(v.x, v.y, v.z);
+      if (rMag <= 0 || gm <= 0) return null;
+
+      const h = { // specific angular momentum: r × v
+        x: r.y * v.z - r.z * v.y,
+        y: r.z * v.x - r.x * v.z,
+        z: r.x * v.y - r.y * v.x
+      };
+      const hMag = Math.hypot(h.x, h.y, h.z);
+      if (hMag <= 0) return null;
+
+      const n = { x: -h.y, y: h.x }; // node vector: ẑ × h (z-component is always 0)
+      const nMag = Math.hypot(n.x, n.y);
+
+      const rDotV  = r.x * v.x + r.y * v.y + r.z * v.z;
+      const coeff  = vMag * vMag - gm / rMag;
+      const eVec   = {
+        x: (coeff * r.x - rDotV * v.x) / gm,
+        y: (coeff * r.y - rDotV * v.y) / gm,
+        z: (coeff * r.z - rDotV * v.z) / gm
+      };
+      const e = Math.hypot(eVec.x, eVec.y, eVec.z);
+
+      const energy = (vMag * vMag) / 2 - gm / rMag;
+      if (energy >= 0 || e >= 1) return null; // only closed (elliptical) orbits are drawn
+      const a = -gm / (2 * energy);
+
+      const r2d   = 180 / Math.PI;
+      const clamp = (x) => Math.min(1, Math.max(-1, x));
+      const i     = Math.acos(clamp(h.z / hMag)) * r2d;
+
+      let raan = nMag > 1e-6 ? Math.atan2(n.y, n.x) * r2d : 0;
+      if (raan < 0) raan += 360;
+
+      let argp = 0;
+      if (nMag > 1e-6 && e > 1e-6) {
+        argp = Math.acos(clamp((n.x * eVec.x + n.y * eVec.y) / (nMag * e))) * r2d;
+        if (eVec.z < 0) argp = 360 - argp;
+      }
+
+      return { a, e, i, raan, argp };
+    }
+
     // ── Earth mesh (persistent; only its radius changes as telemetry arrives) ─
     let earthMesh   = null;
     let earthRadius = EARTH_RADIUS_FALLBACK;
@@ -523,6 +579,7 @@
       ensureEarthMesh(earthObj.radius);
 
       const ePos = earthObj.cart?.pos;
+      const eVel = earthObj.cart?.vel;
 
       spacecraft.forEach(o => {
         const isSelected = o.id === selectedId;
@@ -580,9 +637,12 @@
           craftMeshes[o.id] = craftObj;
         }
 
-        // ── Orbit line (Earth-relative, no parent offset needed) ──
-        if (o.kep) {
-          const pts = kepOrbitPoints(o.kep);
+        // ── Orbit line, derived from this object's own state relative to Earth ──
+        if (o.cart?.pos && o.cart?.vel && ePos && eVel) {
+          const r = { x: o.cart.pos.x - ePos.x, y: -(o.cart.pos.y - ePos.y), z: o.cart.pos.z - ePos.z };
+          const v = { x: o.cart.vel.x - eVel.x, y: -(o.cart.vel.y - eVel.y), z: o.cart.vel.z - eVel.z };
+          const kep = cartesianToKepElements(r, v, GM_EARTH);
+          const pts = kep && kepOrbitPoints(kep);
           if (pts) {
             const geo = new THREE.BufferGeometry().setFromPoints(pts);
             orbitGroup.add(new THREE.LineLoop(geo, new THREE.LineBasicMaterial({
