@@ -361,6 +361,7 @@
     const EARTH_ID = 4; // Fixed object ID for Earth in the KSD object model
     const HIDDEN_TYPES = new Set(['spacecenter']); // ground sites, not orbiting spacecraft
     const GM_EARTH = 3.986004418e14; // Earth standard gravitational parameter, m^3/s^2
+    const ORBIT_LINE_RADIUS = 0.05; // Three.js units (≈50 km) — orbit tube thickness
 
     // ── Renderer setup ────────────────────────────────────────────────────────
     const container = document.getElementById('canvas-wrap');
@@ -536,8 +537,15 @@
     let earthMesh   = null;
     let earthRadius = EARTH_RADIUS_FALLBACK;
 
+    // Reused every frame to test whether a marker/label sits behind Earth
+    // from the camera's current viewpoint (see updateOcclusion() below).
+    const occlusionSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), EARTH_RADIUS_FALLBACK * SCALE);
+    const occlusionRay    = new THREE.Ray();
+    const occlusionHit    = new THREE.Vector3();
+
     function ensureEarthMesh(radiusMeters) {
       const r = (radiusMeters != null && radiusMeters > 0) ? radiusMeters : EARTH_RADIUS_FALLBACK;
+      occlusionSphere.radius = r * SCALE;
       if (earthMesh && r === earthRadius) return;
       earthRadius = r;
 
@@ -562,6 +570,7 @@
     // ── Scene update ──────────────────────────────────────────────────────────
     const EARTH_MARKER_ID = '__earth__';
     let craftMeshes = {};
+    let occlusionTargets = []; // { pos: THREE.Vector3, markerEl, labelEl } — checked every frame
 
     function selectObject(id) {
       selectedId = id;
@@ -575,6 +584,7 @@
       clearGroup(orbitGroup);
       clearGroup(bodyGroup);
       craftMeshes = {};
+      occlusionTargets = [];
 
       if (!earthObj) return;
 
@@ -636,6 +646,7 @@
 
           bodyGroup.add(craftObj);
           craftMeshes[o.id] = craftObj;
+          occlusionTargets.push({ pos: pos3.clone(), markerEl: markerWrapper, labelEl: labelWrapper });
         }
 
         // ── Orbit line, derived from this object's own state relative to Earth ──
@@ -671,8 +682,14 @@
             pts = o.kep && kepOrbitPoints(o.kep);
           }
           if (pts) {
-            const geo = new THREE.BufferGeometry().setFromPoints(pts);
-            orbitGroup.add(new THREE.LineLoop(geo, new THREE.LineBasicMaterial({
+            // A plain THREE.Line's width is capped at 1px on most GPU/driver
+            // combos (WebGL never reliably honors LineBasicMaterial.linewidth),
+            // so draw the orbit as a thin closed tube instead — this is the
+            // only approach that reliably renders as a visibly thick line
+            // across platforms, which matters for an exhibition display.
+            const curve    = new THREE.CatmullRomCurve3(pts, true);
+            const tubeGeo  = new THREE.TubeGeometry(curve, pts.length, isSelected ? ORBIT_LINE_RADIUS * 1.5 : ORBIT_LINE_RADIUS, 6, true);
+            orbitGroup.add(new THREE.Mesh(tubeGeo, new THREE.MeshBasicMaterial({
               color:       isSelected ? 0x3ddc84 : 0x1a3555,
               transparent: true,
               opacity:     isSelected ? 0.9 : 0.6
@@ -732,6 +749,26 @@
         : 0.02;
     }
 
+    // ── Occlusion ──────────────────────────────────────────────────────────────
+    // CSS2DRenderer draws marker/label DOM elements as a plain screen-space
+    // overlay — it has no idea Earth's mesh is in front of them, so without
+    // this they'd float visibly "through" Earth. Ray-test each one against
+    // Earth's sphere every frame (camera moves continuously via OrbitControls
+    // even between telemetry polls) and hide the ones on the far side.
+    function updateOcclusion() {
+      const camPos = camera.position;
+      for (const t of occlusionTargets) {
+        const toTarget  = t.pos.clone().sub(camPos);
+        const distToObj = toTarget.length();
+        occlusionRay.origin.copy(camPos);
+        occlusionRay.direction.copy(toTarget).divideScalar(distToObj || 1);
+        const hit     = occlusionRay.intersectSphere(occlusionSphere, occlusionHit);
+        const hidden  = !!hit && occlusionHit.distanceTo(camPos) < distToObj - 1e-6;
+        t.markerEl.style.display = hidden ? 'none' : '';
+        t.labelEl.style.display  = hidden ? 'none' : '';
+      }
+    }
+
     // ── Animation loop ────────────────────────────────────────────────────────
     function animate() {
       requestAnimationFrame(animate);
@@ -743,6 +780,7 @@
         }
       }
       controls.update();
+      updateOcclusion();
       renderer.render(scene, camera);
       labelRenderer.render(scene, camera);
     }
