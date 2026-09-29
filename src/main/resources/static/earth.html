@@ -646,7 +646,7 @@
 
           bodyGroup.add(craftObj);
           craftMeshes[o.id] = craftObj;
-          occlusionTargets.push({ pos: pos3.clone(), markerEl: markerWrapper, labelEl: labelWrapper });
+          occlusionTargets.push({ pos: pos3.clone(), markerObj, labelObj: lbl });
         }
 
         // ── Orbit line, derived from this object's own state relative to Earth ──
@@ -667,12 +667,32 @@
           const v = { x: o.cart.vel.x, y: -o.cart.vel.y, z: o.cart.vel.z };
           const kep = cartesianToKepElements(r, v, GM_EARTH);
           let pts = kep && kepOrbitPoints(kep);
+
+          // Sanity check: a real orbit's periapsis can't be below Earth's
+          // surface. When it comes out that way, the derivation is
+          // mathematically self-consistent with r/v (see git history for the
+          // round-trip proof) but r/v themselves are apparently not a
+          // physically clean two-body state for this object right now — seen
+          // in practice for some spacecraft while the Moon derives perfectly,
+          // so this looks like a KSD-side cart.pos/cart.vel inconsistency
+          // rather than a bug in this derivation. Needs further
+          // investigation; for now, fall back rather than draw a tube that
+          // visibly plows through Earth.
+          if (pts && kep.a * (1 - kep.e) < earthRadius) {
+            console.warn(
+              `[earth.html] derived orbit for ${o.name ?? o.id} dips below Earth's ` +
+              `surface (periapsis ${(kep.a * (1 - kep.e) / 1000).toFixed(1)} km vs ` +
+              `Earth radius ${(earthRadius / 1000).toFixed(1)} km) — falling back to server kep`
+            );
+            pts = null;
+          }
+
           if (!pts) {
             const rMag = Math.hypot(r.x, r.y, r.z);
             const vMag = Math.hypot(v.x, v.y, v.z);
             const energy = (vMag * vMag) / 2 - GM_EARTH / rMag;
             console.warn(
-              `[earth.html] derived kep failed for ${o.name ?? o.id}: ` +
+              `[earth.html] derived kep unusable for ${o.name ?? o.id}: ` +
               `|r|=${rMag.toExponential(4)} m  |v|=${vMag.toExponential(4)} m/s  ` +
               `energy=${energy.toExponential(4)}  kep=${JSON.stringify(kep)}  ` +
               `raw pos=${JSON.stringify(o.cart.pos)} earthPos=${JSON.stringify(ePos)} ` +
@@ -755,6 +775,12 @@
     // this they'd float visibly "through" Earth. Ray-test each one against
     // Earth's sphere every frame (camera moves continuously via OrbitControls
     // even between telemetry polls) and hide the ones on the far side.
+    //
+    // Important: this must set CSS2DObject.visible, NOT style.display on the
+    // wrapper directly — CSS2DRenderer.render() unconditionally overwrites
+    // style.display from object.visible on every single frame, so poking the
+    // DOM style here would just get clobbered by the very next
+    // labelRenderer.render() call in animate().
     function updateOcclusion() {
       const camPos = camera.position;
       for (const t of occlusionTargets) {
@@ -762,10 +788,10 @@
         const distToObj = toTarget.length();
         occlusionRay.origin.copy(camPos);
         occlusionRay.direction.copy(toTarget).divideScalar(distToObj || 1);
-        const hit     = occlusionRay.intersectSphere(occlusionSphere, occlusionHit);
-        const hidden  = !!hit && occlusionHit.distanceTo(camPos) < distToObj - 1e-6;
-        t.markerEl.style.display = hidden ? 'none' : '';
-        t.labelEl.style.display  = hidden ? 'none' : '';
+        const hit    = occlusionRay.intersectSphere(occlusionSphere, occlusionHit);
+        const hidden = !!hit && occlusionHit.distanceTo(camPos) < distToObj - 1e-6;
+        t.markerObj.visible = !hidden;
+        t.labelObj.visible  = !hidden;
       }
     }
 
