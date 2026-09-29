@@ -469,13 +469,22 @@
     }
 
     // ── Cartesian state (Earth-relative) → Keplerian elements ────────────────
-    // The server's own `kep` field is expressed in Earth's tilted equatorial
-    // reference frame (KSD applies an axial-tilt rotation on top of it before
-    // it ever reaches this client), so it doesn't line up with `cart.pos`,
-    // which is already in the same world frame the markers are drawn in. To
-    // keep the orbit line glued to the marker regardless of that, derive the
-    // ellipse directly from the object's own relative position/velocity
-    // instead of trusting the server's kep values.
+    // TODO(KSD-side fix): this whole function is a client-side workaround for
+    // a KSD (kidotoru/keplerian) server-side issue, not something this app
+    // should own long-term. Once KSD is fixed to send `kep` in the same world
+    // frame as `cart.pos`, DELETE this function and the derivation call
+    // below, and go back to drawing orbit lines straight from `o.kep`
+    // (kepOrbitPoints(o.kep), the same way index.html still does).
+    //
+    // Root cause (see kidotoru/keplerian, ASpaceObject::RotateParentAxialTiltAxis
+    // in Source/Keplerian/Private/SpaceObject.cpp): the server's own `kep`
+    // field is expressed in Earth's tilted equatorial reference frame (an
+    // axial-tilt rotation is applied on top of it before it becomes
+    // `cart.pos`/`cart.vel`), so it doesn't line up with `cart.pos`, which is
+    // already in the same world frame the markers are drawn in. To keep the
+    // orbit line glued to the marker regardless of that, derive the ellipse
+    // directly from the object's own relative position/velocity instead of
+    // trusting the server's kep values.
     // r, v must be in the right-handed frame kepOrbitPoints() expects, i.e.
     // Unreal (x, y, z) with y negated — see toThree()/icrfToThree() above.
     function cartesianToKepElements(r, v, gm) {
@@ -637,11 +646,18 @@
         }
 
         // ── Orbit line, derived from this object's own state relative to Earth ──
+        // TODO(KSD-side fix): see cartesianToKepElements() above — once KSD
+        // sends `kep` in world frame, replace this block with
+        // `const pts = kepOrbitPoints(o.kep);` and delete the derivation.
+        //
         // Note: unlike cart.pos (heliocentric absolute, needs the Earth offset
         // subtracted), cart.vel for a child of Earth is sent already relative
         // to Earth — confirmed empirically: subtracting Earth's own velocity
         // from e.g. ISS's raw vel gives ~27 km/s (nonsense for LEO), while
-        // using ISS's raw vel as-is gives ~7.65 km/s (correct).
+        // using ISS's raw vel as-is gives ~7.65 km/s (correct). This may be a
+        // separate KSD quirk from the axial-tilt one above, or the same fix
+        // may resolve both — worth rechecking cart.vel's frame when KSD's
+        // kep/world-frame mismatch is fixed.
         if (o.cart?.pos && o.cart?.vel && ePos) {
           const r = { x: o.cart.pos.x - ePos.x, y: -(o.cart.pos.y - ePos.y), z: o.cart.pos.z - ePos.z };
           const v = { x: o.cart.vel.x, y: -o.cart.vel.y, z: o.cart.vel.z };
