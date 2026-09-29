@@ -360,6 +360,7 @@
     const KM     = 1000;           // 1 km in meters
     const SCALE  = 1.0 / (1000 * KM); // Three.js units per meter (1 unit = 1000 km)
     const EARTH_RADIUS_FALLBACK = 6371000; // meters, used until telemetry arrives
+    const EARTH_ID = 4; // Fixed object ID for Earth in the KSD object model
 
     // ── Renderer setup ────────────────────────────────────────────────────────
     const container = document.getElementById('canvas-wrap');
@@ -780,7 +781,7 @@
           .toISOString().replace("T", " ").slice(0, 19) + " UTC";
       }
 
-      earthObj = objects.find(o => (o.name ?? "").trim().toLowerCase() === "earth") ?? null;
+      earthObj = objects.find(o => o.id === EARTH_ID) ?? null;
       spacecraft = earthObj ? objects.filter(o => o.parentId === earthObj.id) : [];
 
       if (earthObj && selectedId == null) selectedId = EARTH_MARKER_ID;
@@ -801,11 +802,9 @@
         const res  = await fetch("/api/objects");
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        statusEl.className   = "ok";
-        statusEl.textContent = earthObj || (data.objects ?? []).some(o => (o.name ?? "").trim().toLowerCase() === "earth")
-          ? "Live"
-          : "Live (waiting for Earth)";
         render(data);
+        statusEl.className   = "ok";
+        statusEl.textContent = earthObj ? "Live" : "Live (waiting for Earth)";
       } catch (e) {
         statusEl.className   = "err";
         statusEl.textContent = e.message;
