@@ -649,7 +649,7 @@
             const curve    = new THREE.CatmullRomCurve3(pts, true);
             const tubeGeo  = new THREE.TubeGeometry(curve, pts.length, isSelected ? ORBIT_LINE_RADIUS * 1.5 : ORBIT_LINE_RADIUS, 6, true);
             orbitGroup.add(new THREE.Mesh(tubeGeo, new THREE.MeshBasicMaterial({
-              color:       isSelected ? 0x3ddc84 : 0xcccccc,
+              color:       isSelected ? 0x3ddc84 : 0x999999,
               transparent: true,
               opacity:     isSelected ? 0.9 : 0.6
             })));
