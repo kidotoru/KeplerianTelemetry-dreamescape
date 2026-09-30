@@ -268,6 +268,7 @@
     const SCALE  = 1.0 / (1000 * KM); // Three.js units per meter (1 unit = 1000 km)
     const EARTH_RADIUS_FALLBACK = 6371000; // meters, used until telemetry arrives
     const EARTH_ID = 4; // Fixed object ID for Earth in the KSD object model
+    const SUN_ID = 1; // Fixed object ID for the Sun in the KSD object model
     const HIDDEN_TYPES = new Set(['spacecenter']); // ground sites, not orbiting spacecraft
     const GM_EARTH = 3.986004418e14; // Earth standard gravitational parameter, m^3/s^2
     const ORBIT_LINE_RADIUS = 0.00625; // Three.js units (≈6.25 km) — orbit tube thickness
@@ -315,6 +316,18 @@
       geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
       scene.add(new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.1, sizeAttenuation: true })));
     }
+
+    // ── Lighting ──────────────────────────────────────────────────────────────
+    // Sunlight direction is updated every telemetry poll from the real Sun→Earth
+    // vector (see updateSunLight()); positioned far away by an arbitrary amount
+    // for now since only the direction to its target (Earth, at the origin)
+    // matters for a directional light.
+    const sunLight = new THREE.DirectionalLight(0xfff4e0, 2.5);
+    sunLight.position.set(50, 0, 0);
+    scene.add(sunLight, sunLight.target);
+    // Dim fill so Earth's night side reads as "in shadow" rather than pure
+    // black void, which would look like a rendering glitch on a booth monitor.
+    scene.add(new THREE.AmbientLight(0x24344a, 0.6));
 
     // ── Scene groups ──────────────────────────────────────────────────────────
     const orbitGroup = new THREE.Group();
@@ -470,10 +483,27 @@
       earthMesh = new THREE.Group();
       earthMesh.add(new THREE.Mesh(
         new THREE.SphereGeometry(physRadius, 32, 32),
-        new THREE.MeshBasicMaterial({ color: 0x2255aa })
+        // Lit material (not MeshBasicMaterial) so sunLight actually shades it —
+        // see updateSunLight() for how its direction is kept pointed at the Sun.
+        new THREE.MeshPhongMaterial({ color: 0x2255aa, shininess: 15, specular: 0x223344 })
       ));
       earthMesh.userData.objectId = EARTH_MARKER_ID;
       scene.add(earthMesh);
+    }
+
+    // ── Sun direction ─────────────────────────────────────────────────────────
+    // Earth is always drawn at the scene origin, so the light only needs to
+    // point along the current real Sun→Earth direction; only sunObj/earthObj's
+    // absolute (heliocentric) cart.pos are needed, same convention as the
+    // Earth-relative spacecraft positions above.
+    function updateSunLight(sunObj, ePos) {
+      if (!sunObj?.cart?.pos || !ePos) return;
+      const dir = toThree(
+        sunObj.cart.pos.x - ePos.x,
+        sunObj.cart.pos.y - ePos.y,
+        sunObj.cart.pos.z - ePos.z
+      ).normalize();
+      sunLight.position.copy(dir.multiplyScalar(50));
     }
 
     // ── Scene update ──────────────────────────────────────────────────────────
@@ -499,6 +529,7 @@
       ensureEarthMesh(earthObj.radius);
 
       const ePos = earthObj.cart?.pos;
+      updateSunLight(sunObj, ePos);
 
       spacecraft.forEach(o => {
         const isSelected = o.id === selectedId;
@@ -728,6 +759,7 @@
 
     let timerId    = null;
     let earthObj   = null;   // the Earth SpaceObject, or null until telemetry arrives
+    let sunObj     = null;   // the Sun SpaceObject, used only to aim sunLight
     let spacecraft = [];     // objects whose parentId === earthObj.id
     let selectedId = null;   // number (spacecraft id) or EARTH_MARKER_ID
 
@@ -785,6 +817,7 @@
       }
 
       earthObj = objects.find(o => o.id === EARTH_ID) ?? null;
+      sunObj   = objects.find(o => o.id === SUN_ID) ?? null;
       spacecraft = earthObj
         ? objects.filter(o => o.parentId === earthObj.id && !HIDDEN_TYPES.has((o.type ?? "").trim().toLowerCase()))
         : [];
