@@ -82,6 +82,7 @@ public class KsdWebSocketHandler extends TextWebSocketHandler {
 
     private void handleTelemetry(TelemetryMessage msg) {
         store.setCurrentTime(msg.currentTime());
+        store.setSelectedId(msg.selectedId());
         for (SpaceObjectInput o : msg.spaceObjects()) {
             store.putTelemetry(o.id(), o.cart(), o.kep(), o.orbitRev(), o.orbitLegs());
         }

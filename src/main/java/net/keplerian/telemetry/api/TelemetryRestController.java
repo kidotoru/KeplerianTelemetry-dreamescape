@@ -35,7 +35,7 @@ public class TelemetryRestController {
         if (!orbits) {
             objects = objects.stream().map(SpaceObject::withoutOrbitLegs).toList();
         }
-        return new TelemetryResponse(store.getCurrentTime(), objects);
+        return new TelemetryResponse(store.getCurrentTime(), store.getSelectedId(), objects);
     }
 
     /**

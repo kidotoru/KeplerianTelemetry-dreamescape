@@ -222,6 +222,7 @@ KSD は軌道線（`orbitRev` / `orbitLegs`）を、**接続後の最初の `Tel
 {
   "messageType": "Telemetry",
   "currentTime": 1609459200,
+  "selectedId": 3,
   "spaceObjects": [
     {
       "id": 3,
@@ -256,6 +257,7 @@ KSD は軌道線（`orbitRev` / `orbitLegs`）を、**接続後の最初の `Tel
 |---|---|---|
 | `messageType` | string | 固定値 `"Telemetry"` |
 | `currentTime` | number | シミュレーション時刻（Unix 秒） |
+| `selectedId` | number \| null | KSD で選択中のオブジェクト ID。選択は常に1つだけ。未選択なら `null` |
 | `spaceObjects[].id` | number | オブジェクト ID |
 | `spaceObjects[].cart.pos` | Vector3 | 位置（メートル） |
 | `spaceObjects[].cart.vel` | Vector3 | 親天体に対する相対速度（m/s）。座標軸は `pos` と同じ |
@@ -302,6 +304,7 @@ GET /api/objects?orbits=true
 ```json
 {
   "currentTime": 1609459200,
+  "selectedId": 3,
   "objects": [
     {
       "id": 1,
@@ -429,6 +432,7 @@ GET /api/objects/3?orbits=true
 | フィールド | 型 | 説明 |
 |---|---|---|
 | `currentTime` | Long | 現在のシミュレーション時刻（Unix 秒） |
+| `selectedId` | Long \| null | KSD で選択中のオブジェクト ID。未選択なら `null` |
 | `objects` | SpaceObject[] | 全オブジェクトの配列 |
 
 ### SpaceObject

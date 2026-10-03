@@ -17,6 +17,7 @@ public class TelemetryStore {
 
     private final Map<Long, SpaceObject> objects = new ConcurrentHashMap<>();
     private volatile Long currentTime = null;
+    private volatile Long selectedId = null;
 
     public void setCurrentTime(long currentTime) {
         this.currentTime = currentTime;
@@ -24,6 +25,14 @@ public class TelemetryStore {
 
     public Long getCurrentTime() {
         return currentTime;
+    }
+
+    public void setSelectedId(Long selectedId) {
+        this.selectedId = selectedId;
+    }
+
+    public Long getSelectedId() {
+        return selectedId;
     }
 
     public void putTelemetry(long id,
