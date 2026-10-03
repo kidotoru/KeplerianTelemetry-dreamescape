@@ -101,7 +101,7 @@ public class KsdWebSocketHandler extends TextWebSocketHandler {
         store.setSelectedId(msg.selectedId());
         selectedHistory.record(msg.selectedId(), msg.currentTime(), msg.selectedState());
         for (SpaceObjectInput o : msg.spaceObjects()) {
-            store.putTelemetry(o.id(), o.cart(), o.kep(), o.orbitRev(), o.orbitLegs());
+            store.putTelemetry(o.id(), o.cart(), o.kep(), o.orbitRev(), o.orbitLegs(), o.orientation());
         }
         log.debug("Updated {} objects at t={}", msg.spaceObjects().size(), msg.currentTime());
     }

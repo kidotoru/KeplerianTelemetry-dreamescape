@@ -320,6 +320,12 @@
     const occlusionRay    = new THREE.Ray();
     const occlusionHit    = new THREE.Vector3();
 
+    // Equirectangular (2:1) Earth texture. Loaded once and shared by every Earth
+    // mesh rebuild. The globe is oriented to KSD's Earth by orientGlobe().
+    const earthTexture = new THREE.TextureLoader().load('img/T_Earth_Map.png');
+    earthTexture.colorSpace = THREE.SRGBColorSpace;
+    earthTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+
     function ensureEarthMesh(radiusMeters) {
       const r = (radiusMeters != null && radiusMeters > 0) ? radiusMeters : EARTH_RADIUS_FALLBACK;
       occlusionSphere.radius = r * SCALE;
@@ -337,13 +343,40 @@
       const physRadius = r * SCALE;
       earthMesh = new THREE.Group();
       earthMesh.add(new THREE.Mesh(
-        new THREE.SphereGeometry(physRadius, 32, 32),
+        new THREE.SphereGeometry(physRadius, 64, 64),
         // Lit material (not MeshBasicMaterial) so sunLight actually shades it —
         // see updateSunLight() for how its direction is kept pointed at the Sun.
-        new THREE.MeshPhongMaterial({ color: 0x2255aa, shininess: 15, specular: 0x223344 })
+        new THREE.MeshPhongMaterial({ map: earthTexture, shininess: 15, specular: 0x223344 })
       ));
       earthMesh.userData.objectId = EARTH_MARKER_ID;
       scene.add(earthMesh);
+    }
+
+    // ── Globe orientation (axial tilt + rotation angle from KSD) ──────────────
+    // KSD sends each body's north pole, (lat 0, lon 0) and (lat 0, lon 90°E)
+    // directions as unit vectors in the same axes as pos. THREE.SphereGeometry's
+    // UVs put an equirectangular map's lon 0 at local +X, the north pole at +Y
+    // and lon 90°E at -Z, so those three directions are exactly the mesh's basis.
+    const globeBasis = new THREE.Matrix4();
+    let warnedMirroredGlobe = false;
+
+    function dirToThree(v) {
+      return new THREE.Vector3(v.x, v.z, v.y); // same axis mapping as toThree(), without scaling
+    }
+
+    function orientGlobe(mesh, orientation) {
+      if (!mesh || !orientation?.north || !orientation?.primeMeridian || !orientation?.east) return;
+      const prime = dirToThree(orientation.primeMeridian).normalize();
+      const north = dirToThree(orientation.north).normalize();
+      const east  = dirToThree(orientation.east).normalize();
+      globeBasis.makeBasis(prime, north, east.negate());
+      if (globeBasis.determinant() < 0) {
+        // Would mean the map comes out mirrored; a rotation can't represent that
+        if (!warnedMirroredGlobe) console.warn('[earth] orientation basis is mirrored; leaving the globe unrotated');
+        warnedMirroredGlobe = true;
+        return;
+      }
+      mesh.quaternion.setFromRotationMatrix(globeBasis);
     }
 
     // ── Sun direction ─────────────────────────────────────────────────────────
@@ -382,6 +415,7 @@
       if (!earthObj) return;
 
       ensureEarthMesh(earthObj.radius);
+      orientGlobe(earthMesh, earthObj.orientation);
 
       const ePos = earthObj.cart?.pos;
       updateSunLight(sunObj, ePos);

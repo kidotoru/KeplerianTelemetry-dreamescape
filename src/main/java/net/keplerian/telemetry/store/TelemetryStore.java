@@ -1,6 +1,7 @@
 package net.keplerian.telemetry.store;
 
 import net.keplerian.telemetry.model.OrbitLeg;
+import net.keplerian.telemetry.model.Orientation;
 import net.keplerian.telemetry.model.SpaceObject;
 import net.keplerian.telemetry.model.SpaceObjectInfo;
 import org.springframework.stereotype.Component;
@@ -39,16 +40,17 @@ public class TelemetryStore {
                              net.keplerian.telemetry.model.CartesianElements cart,
                              net.keplerian.telemetry.model.KeplerianElements kep,
                              Long orbitRev,
-                             List<OrbitLeg> orbitLegs) {
+                             List<OrbitLeg> orbitLegs,
+                             Orientation orientation) {
         objects.merge(id,
                 new SpaceObject(id, null, null, null, null, cart, kep,
-                        orbitLegs != null ? orbitRev : null, orbitLegs),
-                (existing, incoming) -> existing.withTelemetry(cart, kep, orbitRev, orbitLegs));
+                        orbitLegs != null ? orbitRev : null, orbitLegs, orientation),
+                (existing, incoming) -> existing.withTelemetry(cart, kep, orbitRev, orbitLegs, orientation));
     }
 
     public void putInfo(SpaceObjectInfo info) {
         objects.merge(info.id(),
-                new SpaceObject(info.id(), info.name(), info.type(), info.parentId(), info.radius(), null, null, null, null),
+                new SpaceObject(info.id(), info.name(), info.type(), info.parentId(), info.radius(), null, null, null, null, null),
                 (existing, incoming) -> existing.withInfo(info.name(), info.type(), info.parentId(), info.radius()));
     }
 

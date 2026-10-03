@@ -275,6 +275,7 @@ KSD は軌道線（`orbitRev` / `orbitLegs`）を、**接続後の最初の `Tel
 | `spaceObjects[].kep.ma` | number | 平均近点角（度） |
 | `spaceObjects[].orbitRev` | number | 軌道線の版（省略可）。内容が変わると変わる。等しいかどうかの比較にだけ使う |
 | `spaceObjects[].orbitLegs` | OrbitLeg[] | 軌道線（省略可。`orbitRev` と同時にだけ付く）。空配列は「軌道線なし」 |
+| `spaceObjects[].orientation` | Orientation | 天体の向き（地軸の傾きと自転角）。天体のときだけ付く |
 
 > **ケプラー要素について:** `kep` は親天体の赤道面を基準とした軌道要素で、`pos` とは座標系が異なる（KSD 内部で親天体の赤道傾斜などの変換を経て `pos` になる）。軌道線は `kep` から計算せず、`orbitLegs` を使うこと。
 
@@ -483,6 +484,21 @@ GET /api/objects/3?orbits=true
 | `kep` | KeplerianElements | ケプラー要素 |
 | `orbitRev` | number \| null | 軌道線の版。未受信なら `null` |
 | `orbitLegs` | OrbitLeg[] | 軌道線。`?orbits=true` のときだけ含まれる |
+| `orientation` | Orientation | 天体の向き。天体のときだけ含まれる |
+
+### Orientation
+
+天体の向き（地軸の傾きと自転角）を、`pos` と同じ座標軸の単位ベクトル3本で表す。毎回の Telemetry で最新の向きが届く。
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `north` | Vector3 | 北極の方向（地軸。傾きを含む） |
+| `primeMeridian` | Vector3 | 緯度 0・経度 0 の方向（自転角を含む） |
+| `east` | Vector3 | 緯度 0・東経 90 度の方向 |
+
+緯度・経度は KSD 本体の表示と同じ約束（北緯・東経が正）。正距円筒図法（経度 0 が中央）のテクスチャを貼った球を、
+`primeMeridian` が経度 0、`north` が北極、`east` が東経 90 度を向くように回せば、KSD の天体と同じ向きになる。
+3本とも `pos` と同じ変換（Unreal Engine の左手系 → 表示側の座標系）をかけてから使うこと。
 
 ### OrbitLeg
 
