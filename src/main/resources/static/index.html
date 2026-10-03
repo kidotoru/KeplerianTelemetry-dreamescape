@@ -33,74 +33,8 @@
       pointer-events: none;
     }
 
-    header, #detail-panel { pointer-events: auto; }
+    #detail-panel { pointer-events: auto; }
 
-    /* ── Header ── */
-    header {
-      display: flex;
-      align-items: center;
-      padding: 10px 20px;
-      border-bottom: 1px solid rgba(30,48,80,0.8);
-      background: rgba(10,14,26,0.85);
-      backdrop-filter: blur(4px);
-      flex-shrink: 0;
-      gap: 12px;
-    }
-
-    header h1 {
-      font-size: 15px;
-      font-weight: normal;
-      letter-spacing: 0.15em;
-      color: #7eb8f7;
-      text-transform: uppercase;
-    }
-
-    #time-box {
-      margin: 0 auto;
-      border: 1px solid #1e3050;
-      padding: 5px 18px;
-      text-align: center;
-    }
-
-    #time-label {
-      font-size: 9px;
-      text-transform: uppercase;
-      letter-spacing: 0.15em;
-      color: #4a6a90;
-      margin-bottom: 2px;
-    }
-
-    #current-time {
-      font-size: 13px;
-      color: #7eb8f7;
-      letter-spacing: 0.05em;
-    }
-
-    #interval-box { display: flex; align-items: center; gap: 8px; }
-
-    #interval-label {
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      color: #4a6a90;
-    }
-
-    #poll-interval {
-      background: rgba(13,18,32,0.9);
-      color: #c8d8f0;
-      border: 1px solid #2a4060;
-      border-radius: 3px;
-      padding: 4px 8px;
-      font-family: inherit;
-      font-size: 12px;
-      cursor: pointer;
-    }
-
-    #poll-interval:focus { outline: 1px solid #7eb8f7; }
-
-    #status { font-size: 11px; color: #4a6a90; }
-    #status.ok::before  { content: "● "; color: #3ddc84; }
-    #status.err::before { content: "● "; color: #e05555; }
 
     /* ── Layout ── */
     .layout {
@@ -191,24 +125,6 @@
   <div id="canvas-wrap"></div>
 
   <div id="ui">
-    <header>
-      <h1>Keplerian Telemetry</h1>
-      <div id="time-box">
-        <div id="time-label">Current Time</div>
-        <div id="current-time">—</div>
-      </div>
-      <div id="interval-box">
-        <span id="interval-label">Interval</span>
-        <select id="poll-interval">
-          <option value="1000">1 sec</option>
-          <option value="3000">3 sec</option>
-          <option value="5000">5 sec</option>
-          <option value="10000" selected>10 sec</option>
-        </select>
-      </div>
-      <div id="status">Connecting…</div>
-    </header>
-
     <div class="layout">
       <div id="content">
         <div id="detail-panel">
@@ -620,12 +536,9 @@
     animate();
 
     // ── UI logic ──────────────────────────────────────────────────────────────
-    const statusEl       = document.getElementById("status");
-    const currentTimeEl  = document.getElementById("current-time");
-    const pollIntervalEl = document.getElementById("poll-interval");
     const detailPanelEl  = document.getElementById("detail-panel");
 
-    let timerId    = null;
+    const POLL_INTERVAL_MS = 1000; // fixed: refresh once per second
     let objectsById = {};    // all objects by id (orbit legs may be relative to non-Earth parents)
     let earthObj   = null;   // the Earth SpaceObject, or null until telemetry arrives
     let sunObj     = null;   // the Sun SpaceObject, used only to aim sunLight
@@ -680,11 +593,6 @@
 
     function render(data) {
       const objects = (data.objects ?? []).slice().sort((a, b) => a.id - b.id);
-      if (data.currentTime != null) {
-        currentTimeEl.textContent = new Date(data.currentTime * 1000)
-          .toISOString().replace("T", " ").slice(0, 19) + " UTC";
-      }
-
       objectsById = Object.fromEntries(objects.map(o => [o.id, o]));
       earthObj = objects.find(o => o.id === EARTH_ID) ?? null;
       sunObj   = objects.find(o => o.id === SUN_ID) ?? null;
@@ -708,23 +616,19 @@
         const data = await res.json();
         await refreshOrbits(data.objects ?? []);
         render(data);
-        statusEl.className   = "ok";
-        statusEl.textContent = earthObj ? "Live" : "Live (waiting for Earth)";
       } catch (e) {
-        statusEl.className   = "err";
-        statusEl.textContent = e.message;
+        console.warn(`[poll] ${e.message}`);
       }
     }
 
-    function startPolling() {
-      if (timerId !== null) clearInterval(timerId);
-      timerId = setInterval(poll, Number(pollIntervalEl.value));
+    // Schedule the next poll only after the current one finishes, so slow
+    // responses (e.g. orbit-line fetches) never pile up overlapping requests.
+    async function pollLoop() {
+      await poll();
+      setTimeout(pollLoop, POLL_INTERVAL_MS);
     }
 
-    pollIntervalEl.addEventListener("change", startPolling);
-
-    poll();
-    startPolling();
+    pollLoop();
   </script>
 </body>
 </html>
