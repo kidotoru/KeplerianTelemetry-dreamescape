@@ -52,6 +52,14 @@ public class TelemetryStore {
                 (existing, incoming) -> existing.withInfo(info.name(), info.type(), info.parentId(), info.radius()));
     }
 
+    /**
+     * ids に含まれないオブジェクトを削除する。ObjectList は現存するオブジェクトの一覧なので、
+     * 載っていないもの（破棄された段・墜落した機体など）は KSD 側にもう存在しない
+     */
+    public void retainOnly(java.util.Set<Long> ids) {
+        objects.keySet().retainAll(ids);
+    }
+
     public Collection<SpaceObject> getAll() {
         return Collections.unmodifiableCollection(objects.values());
     }

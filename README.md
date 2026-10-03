@@ -173,6 +173,9 @@ KSD は軌道線（`orbitRev` / `orbitLegs`）を、**接続後の最初の `Tel
 
 宇宙オブジェクトのメタデータを送信する。
 
+`QueryObjects` への応答のほか、**オブジェクトの集合か親子関係が前回の `ObjectList` から変わったとき**（機体の生成・消滅、SOI 遷移で親天体が変わったときなど）にも、KSD が `Telemetry` の直前に自分から送り直す。
+`ObjectList` は現存するオブジェクトの完全な一覧である。サーバは、一覧に載っていないオブジェクトを保持している場合は削除すること。
+
 ```json
 {
   "messageType": "ObjectList",

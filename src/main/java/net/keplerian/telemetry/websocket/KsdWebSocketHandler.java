@@ -107,6 +107,8 @@ public class KsdWebSocketHandler extends TextWebSocketHandler {
     }
 
     private void handleObjectInfo(ObjectInfoMessage msg) {
+        // ObjectList が正本。載っていないオブジェクトは消えたものとして削除してから反映する
+        store.retainOnly(msg.spaceObjects().stream().map(info -> info.id()).collect(java.util.stream.Collectors.toSet()));
         for (var info : msg.spaceObjects()) {
             store.putInfo(info);
         }
