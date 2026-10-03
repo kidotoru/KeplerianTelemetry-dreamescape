@@ -165,12 +165,14 @@
       cursor: pointer;
       white-space: nowrap;
       text-align: center;
-      transform: translate(-50%, calc(-100% - 14px));
+      /* CSS2DRenderer already centers the wrapper on the point; only lift the label above the marker */
+      transform: translateY(calc(-100% - 14px));
     }
 
     .body-label.lbl-selected { color: #3ddc84; }
 
-    /* ── Body position markers (constant screen size) ── */
+    /* ── Body position markers (constant screen size) ──
+       No transform here: CSS2DRenderer already centers the wrapper (and so this circle) on the point */
     .body-marker {
       width: 14px;
       height: 14px;
@@ -178,7 +180,6 @@
       border: 1.5px solid rgba(85,136,187,0.75);
       pointer-events: auto;
       cursor: pointer;
-      transform: translate(-50%, -50%);
       box-sizing: border-box;
     }
 
