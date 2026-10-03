@@ -10,11 +10,10 @@ KSD pushes object/orbit data over WebSocket; this server exposes it via REST
 (`/api/objects`), and `src/main/resources/static/` holds the reference web
 dashboards. See `README.md` for the API spec.
 
-- `index.html` — full solar-system view, tree-navigable (Sun → planets →
-  satellites).
-- `earth.html` — Earth-fixed view: always centered on Earth (object id 4,
-  fixed), shows only Earth's own orbiting spacecraft/moon. Added for the
-  dreamscape exhibition (see below).
+- `index.html` — Earth-fixed view: always centered on Earth (object id 4,
+  fixed), shows only Earth's own orbiting spacecraft/moon. Built for the
+  dreamscape exhibition (see below). (It was `earth.html`; the original
+  solar-system `index.html` was dropped from this fork.)
 
 ## dreamscape exhibition (2026)
 
@@ -22,9 +21,9 @@ KSD will be exhibited at the "dreamscape" event: https://dreamscape-game.com/
 
 Planned booth setup: **two monitors side by side**.
 1. One runs KSD itself (the Unreal Engine game/sim).
-2. The other shows this web dashboard (`earth.html`), live via the REST API.
+2. The other shows this web dashboard (`index.html`), live via the REST API.
 
-Because it's a visitor-facing display, ongoing work on `earth.html` should
+Because it's a visitor-facing display, ongoing work on `index.html` should
 prioritize:
 - **Visual polish** — this is a showpiece, not just a debug view.
 - **Rich on-screen data** — surfacing more of the telemetry numbers
@@ -41,6 +40,6 @@ parent's equatorial frame and does **not** match `cart.pos`; don't compute
 orbit lines from it. `cart.vel` is relative to the parent body, in the same
 axes as `cart.pos`. See README "軌道線の描き方".
 
-(This replaced an earlier `earth.html` workaround that derived elements from
+(This replaced an earlier workaround in this Earth view that derived elements from
 `cart.pos`/`cart.vel`; that was unreliable because KSD used to send `cart.vel`
 in the untilted parent frame.)
