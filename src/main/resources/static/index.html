@@ -38,12 +38,12 @@
     /* ── Flight chart (selected spacecraft: surface speed / altitude vs time) ── */
     #flight-chart {
       position: fixed;
-      top: 12px;
+      bottom: 12px;
       left: 12px;
       width: min(42vw, 680px);
       aspect-ratio: 5 / 3;
-      background: rgba(28, 44, 68, 0.82);
-      border: 1px solid rgba(60, 90, 130, 0.6);
+      background: rgba(28, 44, 68, 0.4);
+      border: 1px solid rgba(60, 90, 130, 0.5);
       pointer-events: none;
       display: none;
       z-index: 11;
@@ -630,8 +630,21 @@
     // Surface speed and altitude of the spacecraft selected in KSD, against
     // in-game time since it was selected. The server keeps the history (and
     // restarts it when the selection changes); this only draws it.
-    const CHART_SPEED_MAX_KMS = 10;  // left axis, fixed
-    const CHART_ALT_MAX_KM    = 600; // right axis, fixed
+    // Each axis steps up through these scales as the values grow; the last
+    // one is the ceiling (values beyond it run off the top).
+    const CHART_SPEED_SCALES = [{ max: 2.5 }, { max: 5 }, { max: 10 }];  // km/s, left axis
+    const CHART_ALT_SCALES   = [{ max: 100 }, { max: 300 }, { max: 600 }]; // km, right axis
+    // Both y axes share the same horizontal grid: always this many divisions, so
+    // each label is max / CHART_Y_DIVISIONS × k and the left/right labels line up
+    const CHART_Y_DIVISIONS = 5;
+    // Time axis: 100 s → 300 s → 600 s → 1000 s, then a sliding window of the latest 1000 s
+    // tick: tick-mark interval, label: label interval
+    const CHART_TIME_SCALES = [
+      { span: 100,  tick: 10,  label: 20 },
+      { span: 300,  tick: 50,  label: 50 },
+      { span: 600,  tick: 50,  label: 100 },
+      { span: 1000, tick: 100, label: 100 },
+    ];
     const CHART_SPEED_COLOR   = '#eef3fa';
     const CHART_ALT_COLOR     = '#e08080';
     const CHART_AXIS_COLOR    = 'rgba(200, 216, 240, 0.85)';
@@ -640,11 +653,15 @@
     const flightChartCanvas = document.getElementById('flight-chart-canvas');
     let lastHistory = null;
 
-    // Time axis: 0–100 s, then 0–1000 s, then a sliding window of the latest 1000 s
+    // Smallest scale that fits value (the largest one if none does)
+    function pickScale(scales, value, key = 'max') {
+      return scales.find(sc => value <= sc[key]) ?? scales[scales.length - 1];
+    }
+
+    // Returns [t0, t1, scale]: 0..span while it fits, then the sliding window of the largest span
     function chartTimeRange(lastT) {
-      if (lastT <= 100)  return [0, 100];
-      if (lastT <= 1000) return [0, 1000];
-      return [lastT - 1000, lastT];
+      const sc = pickScale(CHART_TIME_SCALES, lastT, 'span');
+      return lastT <= sc.span ? [0, sc.span, sc] : [lastT - sc.span, lastT, sc];
     }
 
     function drawFlightChart(history) {
@@ -670,39 +687,39 @@
       const pad = { left: fontPx * 5.2, right: fontPx * 5.2, top: fontPx * 1.2, bottom: fontPx * 3.4 };
       const pw = w - pad.left - pad.right;
       const ph = h - pad.top - pad.bottom;
-      const [t0, t1] = chartTimeRange(samples[samples.length - 1].t);
+      const [t0, t1, timeScale] = chartTimeRange(samples[samples.length - 1].t);
+      const speedScale = pickScale(CHART_SPEED_SCALES, Math.max(...samples.map(p => p.surfaceSpeed)) / 1000);
+      const altScale   = pickScale(CHART_ALT_SCALES,   Math.max(...samples.map(p => p.altitude)) / 1000);
       const xOf    = t => pad.left + (t - t0) / (t1 - t0) * pw;
-      const ySpeed = kms => pad.top + ph - kms / CHART_SPEED_MAX_KMS * ph;
-      const yAlt   = km  => pad.top + ph - km / CHART_ALT_MAX_KM * ph;
+      const ySpeed = kms => pad.top + ph - kms / speedScale.max * ph;
+      const yAlt   = km  => pad.top + ph - km / altScale.max * ph;
 
       ctx.font = `bold ${fontPx}px "Courier New", monospace`;
       ctx.lineWidth = 1;
 
-      // Horizontal grid + both y-axis labels (5 divisions: 2 km/s, 120 km)
+      // Horizontal grid shared by both y axes (e.g. 600 km → 120, 240, 360, 480, 600)
       ctx.textBaseline = 'middle';
-      for (let k = 0; k <= 5; k++) {
-        const y = pad.top + ph - (k / 5) * ph;
+      for (let k = 0; k <= CHART_Y_DIVISIONS; k++) {
+        const y = pad.top + ph - (k / CHART_Y_DIVISIONS) * ph;
         ctx.strokeStyle = CHART_GRID_COLOR;
         ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + pw, y); ctx.stroke();
         ctx.fillStyle = CHART_SPEED_COLOR;
         ctx.textAlign = 'right';
-        ctx.fillText((k * CHART_SPEED_MAX_KMS / 5).toFixed(1), pad.left - fontPx * 0.5, y);
+        ctx.fillText((k * speedScale.max / CHART_Y_DIVISIONS).toFixed(1), pad.left - fontPx * 0.5, y);
         ctx.fillStyle = CHART_ALT_COLOR;
         ctx.textAlign = 'left';
-        ctx.fillText(String(k * CHART_ALT_MAX_KM / 5), pad.left + pw + fontPx * 0.5, y);
+        ctx.fillText(String(Math.round(k * altScale.max / CHART_Y_DIVISIONS)), pad.left + pw + fontPx * 0.5, y);
       }
 
-      // Time ticks: every 10 s on the 100 s scale, every 100 s otherwise
-      const step = (t1 - t0) <= 100 ? 10 : 100;
-      const labelEvery = (t1 - t0) <= 100 ? 20 : 100;
+      // Time ticks
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
       ctx.fillStyle = CHART_AXIS_COLOR;
-      for (let t = Math.ceil(t0 / step) * step; t <= t1 + 1e-9; t += step) {
+      for (let t = Math.ceil(t0 / timeScale.tick) * timeScale.tick; t <= t1 + 1e-9; t += timeScale.tick) {
         const x = xOf(t);
         ctx.strokeStyle = CHART_AXIS_COLOR;
         ctx.beginPath(); ctx.moveTo(x, pad.top + ph); ctx.lineTo(x, pad.top + ph + fontPx * 0.4); ctx.stroke();
-        if (Math.round(t) % labelEvery === 0) {
+        if (Math.round(t) % timeScale.label === 0) {
           ctx.fillText(String(Math.round(t)), x, pad.top + ph + fontPx * 0.6);
         }
       }
@@ -732,7 +749,7 @@
       ctx.fillText('ALTITUDE [km]', 0, 0);
       ctx.restore();
 
-      // Data lines, clipped to the plot area (values beyond the fixed maxima run off the top)
+      // Data lines, clipped to the plot area (values beyond the largest scale run off the top)
       ctx.save();
       ctx.beginPath(); ctx.rect(pad.left, pad.top, pw, ph); ctx.clip();
       ctx.lineWidth = 2;
