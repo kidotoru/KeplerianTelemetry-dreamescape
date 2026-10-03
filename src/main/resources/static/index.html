@@ -257,7 +257,6 @@
     const EARTH_ID = 4; // Fixed object ID for Earth in the KSD object model
     const SUN_ID = 1; // Fixed object ID for the Sun in the KSD object model
     const HIDDEN_TYPES = new Set(['spacecenter']); // ground sites, not orbiting spacecraft
-    const ORBIT_LINE_RADIUS = 0.00625; // Three.js units (≈6.25 km) — orbit tube thickness
 
     // ── Renderer setup ────────────────────────────────────────────────────────
     const container = document.getElementById('canvas-wrap');
@@ -514,20 +513,14 @@
         // ── Orbit line (point arrays from KSD) ──
         const orbit = orbitCache.get(o.id);
         if (orbit && ePos) {
+          const material = new THREE.LineBasicMaterial({
+            color:       isSelected ? 0x3ddc84 : 0x999999,
+            transparent: true,
+            opacity:     isSelected ? 0.9 : 0.6
+          });
+          // Segments are open polylines (a closed ellipse repeats its first point at the end)
           orbitSegmentsEarthRelative(orbit.legs, ePos).forEach(pts => {
-            // A plain THREE.Line's width is capped at 1px on most GPU/driver
-            // combos (WebGL never reliably honors LineBasicMaterial.linewidth),
-            // so draw the orbit as a thin tube instead — this is the
-            // only approach that reliably renders as a visibly thick line
-            // across platforms, which matters for an exhibition display.
-            // Segments are open polylines (a closed ellipse repeats its first point at the end).
-            const curve    = new THREE.CatmullRomCurve3(pts, false);
-            const tubeGeo  = new THREE.TubeGeometry(curve, pts.length, isSelected ? ORBIT_LINE_RADIUS * 1.5 : ORBIT_LINE_RADIUS, 6, false);
-            orbitGroup.add(new THREE.Mesh(tubeGeo, new THREE.MeshBasicMaterial({
-              color:       isSelected ? 0x3ddc84 : 0x999999,
-              transparent: true,
-              opacity:     isSelected ? 0.9 : 0.6
-            })));
+            orbitGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), material));
           });
         }
       });
