@@ -30,13 +30,17 @@ prioritize:
 - **Rich on-screen data** — surfacing more of the telemetry numbers
   (orbital elements, altitude, velocity, etc.) is a feature, not clutter.
 
-## Known technical debt
+## Orbit lines
 
-`earth.html`'s orbit-line rendering currently derives Keplerian elements
-client-side from each spacecraft's `cart.pos`/`cart.vel` instead of trusting
-the server's `kep` field. This is a workaround for a KSD-side bug (KSD sends
-`kep` in Earth's tilted-equatorial frame, not the same world frame as
-`cart.pos`/`cart.vel`, causing marker/orbit-line misalignment for anything
-orbiting a tilted body). See the `TODO(KSD-side fix)` comments in
-`earth.html` near `cartesianToKepElements()` for the full explanation and
-exactly what to revert once KSD is fixed server-side.
+Both dashboards draw orbit lines from the point arrays KSD sends (`orbitLegs`,
+fetched with `?orbits=true` only when an object's `orbitRev` changes), not from
+`kep`. The points already have every KSD-side frame conversion applied (parent
+body's axial tilt, ground-fixed display during launch, SOI legs), so the line
+is identical to KSD's own and the marker always sits on it. `kep` is in the
+parent's equatorial frame and does **not** match `cart.pos`; don't compute
+orbit lines from it. `cart.vel` is relative to the parent body, in the same
+axes as `cart.pos`. See README "軌道線の描き方".
+
+(This replaced an earlier `earth.html` workaround that derived elements from
+`cart.pos`/`cart.vel`; that was unreliable because KSD used to send `cart.vel`
+in the untilted parent frame.)

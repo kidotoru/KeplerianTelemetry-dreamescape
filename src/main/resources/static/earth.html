@@ -270,7 +270,6 @@
     const EARTH_ID = 4; // Fixed object ID for Earth in the KSD object model
     const SUN_ID = 1; // Fixed object ID for the Sun in the KSD object model
     const HIDDEN_TYPES = new Set(['spacecenter']); // ground sites, not orbiting spacecraft
-    const GM_EARTH = 3.986004418e14; // Earth standard gravitational parameter, m^3/s^2
     const ORBIT_LINE_RADIUS = 0.00625; // Three.js units (≈6.25 km) — orbit tube thickness
 
     // ── Renderer setup ────────────────────────────────────────────────────────
@@ -355,104 +354,41 @@
       return new THREE.Vector3(x * SCALE, z * SCALE, y * SCALE);
     }
 
-    // ICRF right-handed Z-up → Three.js (used internally by kepOrbitPoints)
-    function icrfToThree(x, y, z) {
-      return new THREE.Vector3(x * SCALE, z * SCALE, -y * SCALE);
+    // ── Orbit lines (sent by KSD as point arrays) ─────────────────────────────
+    // orbitCache: id → { rev, legs }. Each leg's points are relative to its
+    // parent body's pos (same axes as pos); KSD has already applied every frame
+    // conversion (parent's axial tilt etc.), so the line is exactly the one KSD
+    // itself draws and the marker always sits on it.
+    const orbitCache = new Map();
+
+    function storeOrbit(o) {
+      if (o?.orbitRev != null && Array.isArray(o.orbitLegs)) {
+        orbitCache.set(o.id, { rev: o.orbitRev, legs: o.orbitLegs });
+      }
     }
 
-    // ── Keplerian orbit → array of Three.js points, centered on the focus ────
-    // (Earth). Orbital elements describe the orbit relative to the parent
-    // body, so with no offset the resulting points are already Earth-relative.
-    // Rotation: perifocal (P,Q,W) → ICRF via R3(−Ω)·R1(−i)·R3(−ω)
-    function kepOrbitPoints(kep, nPts = 200) {
-      const { a, e, i, raan, argp } = kep;
-      if (a == null || a <= 0)          return null;
-      if (e == null || e < 0 || e >= 1) return null;
-      if (i == null || raan == null || argp == null) return null;
-
-      const d2r = Math.PI / 180;
-      const ci = Math.cos(i    * d2r), si = Math.sin(i    * d2r);
-      const cO = Math.cos(raan * d2r), sO = Math.sin(raan * d2r);
-      const cw = Math.cos(argp * d2r), sw = Math.sin(argp * d2r);
-
-      // P-column (toward periapsis) and Q-column (90° ahead) of the DCM
-      const Px = cO*cw - sO*sw*ci,  Py = sO*cw + cO*sw*ci,  Pz = sw*si;
-      const Qx = -cO*sw - sO*cw*ci, Qy = -sO*sw + cO*cw*ci, Qz = cw*si;
-
-      const b = a * Math.sqrt(1 - e * e);
-
-      const pts = [];
-      for (let k = 0; k < nPts; k++) {
-        const E  = (2 * Math.PI * k) / nPts;
-        const xp = a * (Math.cos(E) - e);
-        const yp = b * Math.sin(E);
-        pts.push(icrfToThree(Px*xp + Qx*yp, Py*xp + Qy*yp, Pz*xp + Qz*yp));
-      }
-      return pts;
+    // Fetch orbit lines only for objects whose orbitRev changed since we last fetched them
+    async function refreshOrbits(objects) {
+      const stale = objects.filter(o => o.orbitRev != null && orbitCache.get(o.id)?.rev !== o.orbitRev);
+      await Promise.all(stale.map(async o => {
+        const res = await fetch(`/api/objects/${o.id}?orbits=true`);
+        if (res.ok) storeOrbit(await res.json());
+      }));
     }
 
-    // ── Cartesian state (Earth-relative) → Keplerian elements ────────────────
-    // TODO(KSD-side fix): this whole function is a client-side workaround for
-    // a KSD (kidotoru/keplerian) server-side issue, not something this app
-    // should own long-term. Once KSD is fixed to send `kep` in the same world
-    // frame as `cart.pos`, DELETE this function and the derivation call
-    // below, and go back to drawing orbit lines straight from `o.kep`
-    // (kepOrbitPoints(o.kep), the same way index.html still does).
-    //
-    // Root cause (see kidotoru/keplerian, ASpaceObject::RotateParentAxialTiltAxis
-    // in Source/Keplerian/Private/SpaceObject.cpp): the server's own `kep`
-    // field is expressed in Earth's tilted equatorial reference frame (an
-    // axial-tilt rotation is applied on top of it before it becomes
-    // `cart.pos`/`cart.vel`), so it doesn't line up with `cart.pos`, which is
-    // already in the same world frame the markers are drawn in. To keep the
-    // orbit line glued to the marker regardless of that, derive the ellipse
-    // directly from the object's own relative position/velocity instead of
-    // trusting the server's kep values.
-    // r, v must be in the right-handed frame kepOrbitPoints() expects, i.e.
-    // Unreal (x, y, z) with y negated — see toThree()/icrfToThree() above.
-    function cartesianToKepElements(r, v, gm) {
-      const rMag = Math.hypot(r.x, r.y, r.z);
-      const vMag = Math.hypot(v.x, v.y, v.z);
-      if (rMag <= 0 || gm <= 0) return null;
-
-      const h = { // specific angular momentum: r × v
-        x: r.y * v.z - r.z * v.y,
-        y: r.z * v.x - r.x * v.z,
-        z: r.x * v.y - r.y * v.x
-      };
-      const hMag = Math.hypot(h.x, h.y, h.z);
-      if (hMag <= 0) return null;
-
-      const n = { x: -h.y, y: h.x }; // node vector: ẑ × h (z-component is always 0)
-      const nMag = Math.hypot(n.x, n.y);
-
-      const rDotV  = r.x * v.x + r.y * v.y + r.z * v.z;
-      const coeff  = vMag * vMag - gm / rMag;
-      const eVec   = {
-        x: (coeff * r.x - rDotV * v.x) / gm,
-        y: (coeff * r.y - rDotV * v.y) / gm,
-        z: (coeff * r.z - rDotV * v.z) / gm
-      };
-      const e = Math.hypot(eVec.x, eVec.y, eVec.z);
-
-      const energy = (vMag * vMag) / 2 - gm / rMag;
-      if (energy >= 0 || e >= 1) return null; // only closed (elliptical) orbits are drawn
-      const a = -gm / (2 * energy);
-
-      const r2d   = 180 / Math.PI;
-      const clamp = (x) => Math.min(1, Math.max(-1, x));
-      const i     = Math.acos(clamp(h.z / hMag)) * r2d;
-
-      let raan = nMag > 1e-6 ? Math.atan2(n.y, n.x) * r2d : 0;
-      if (raan < 0) raan += 360;
-
-      let argp = 0;
-      if (nMag > 1e-6 && e > 1e-6) {
-        argp = Math.acos(clamp((n.x * eVec.x + n.y * eVec.y) / (nMag * e))) * r2d;
-        if (eVec.z < 0) argp = 360 - argp;
-      }
-
-      return { a, e, i, raan, argp };
+    // Earth-relative Three.js point arrays (one per unbroken segment) for an object's orbit
+    function orbitSegmentsEarthRelative(legs, ePos) {
+      const out = [];
+      legs.forEach(leg => {
+        // Legs after an SOI change (e.g. into the Moon's) are relative to that body
+        const parentPos = objectsById[leg.parentId]?.cart?.pos;
+        if (!parentPos) return;
+        const ox = parentPos.x - ePos.x, oy = parentPos.y - ePos.y, oz = parentPos.z - ePos.z;
+        leg.segments.forEach(seg => {
+          if (seg.length >= 2) out.push(seg.map(([x, y, z]) => toThree(x + ox, y + oy, z + oz)));
+        });
+      });
+      return out;
     }
 
     // ── Earth mesh (persistent; only its radius changes as telemetry arrives) ─
@@ -588,72 +524,24 @@
           occlusionTargets.push({ pos: pos3.clone(), markerObj, labelObj: lbl });
         }
 
-        // ── Orbit line, derived from this object's own state relative to Earth ──
-        // TODO(KSD-side fix): see cartesianToKepElements() above — once KSD
-        // sends `kep` in world frame, replace this block with
-        // `const pts = kepOrbitPoints(o.kep);` and delete the derivation.
-        //
-        // Note: unlike cart.pos (heliocentric absolute, needs the Earth offset
-        // subtracted), cart.vel for a child of Earth is sent already relative
-        // to Earth — confirmed empirically: subtracting Earth's own velocity
-        // from e.g. ISS's raw vel gives ~27 km/s (nonsense for LEO), while
-        // using ISS's raw vel as-is gives ~7.65 km/s (correct). This may be a
-        // separate KSD quirk from the axial-tilt one above, or the same fix
-        // may resolve both — worth rechecking cart.vel's frame when KSD's
-        // kep/world-frame mismatch is fixed.
-        if (o.cart?.pos && o.cart?.vel && ePos) {
-          const r = { x: o.cart.pos.x - ePos.x, y: -(o.cart.pos.y - ePos.y), z: o.cart.pos.z - ePos.z };
-          const v = { x: o.cart.vel.x, y: -o.cart.vel.y, z: o.cart.vel.z };
-          const kep = cartesianToKepElements(r, v, GM_EARTH);
-          let pts = kep && kepOrbitPoints(kep);
-
-          // Sanity check: a real orbit's periapsis can't be below Earth's
-          // surface. When it comes out that way, the derivation is
-          // mathematically self-consistent with r/v (see git history for the
-          // round-trip proof) but r/v themselves are apparently not a
-          // physically clean two-body state for this object right now — seen
-          // in practice for some spacecraft while the Moon derives perfectly,
-          // so this looks like a KSD-side cart.pos/cart.vel inconsistency
-          // rather than a bug in this derivation. Needs further
-          // investigation; for now, fall back rather than draw a tube that
-          // visibly plows through Earth.
-          if (pts && kep.a * (1 - kep.e) < earthRadius) {
-            console.warn(
-              `[earth.html] derived orbit for ${o.name ?? o.id} dips below Earth's ` +
-              `surface (periapsis ${(kep.a * (1 - kep.e) / 1000).toFixed(1)} km vs ` +
-              `Earth radius ${(earthRadius / 1000).toFixed(1)} km) — falling back to server kep`
-            );
-            pts = null;
-          }
-
-          if (!pts) {
-            const rMag = Math.hypot(r.x, r.y, r.z);
-            const vMag = Math.hypot(v.x, v.y, v.z);
-            const energy = (vMag * vMag) / 2 - GM_EARTH / rMag;
-            console.warn(
-              `[earth.html] derived kep unusable for ${o.name ?? o.id}: ` +
-              `|r|=${rMag.toExponential(4)} m  |v|=${vMag.toExponential(4)} m/s  ` +
-              `energy=${energy.toExponential(4)}  kep=${JSON.stringify(kep)}  ` +
-              `raw pos=${JSON.stringify(o.cart.pos)} earthPos=${JSON.stringify(ePos)} ` +
-              `raw vel=${JSON.stringify(o.cart.vel)} ` +
-              `serverKep=${JSON.stringify(o.kep)}`
-            );
-            pts = o.kep && kepOrbitPoints(o.kep);
-          }
-          if (pts) {
+        // ── Orbit line (point arrays from KSD) ──
+        const orbit = orbitCache.get(o.id);
+        if (orbit && ePos) {
+          orbitSegmentsEarthRelative(orbit.legs, ePos).forEach(pts => {
             // A plain THREE.Line's width is capped at 1px on most GPU/driver
             // combos (WebGL never reliably honors LineBasicMaterial.linewidth),
-            // so draw the orbit as a thin closed tube instead — this is the
+            // so draw the orbit as a thin tube instead — this is the
             // only approach that reliably renders as a visibly thick line
             // across platforms, which matters for an exhibition display.
-            const curve    = new THREE.CatmullRomCurve3(pts, true);
-            const tubeGeo  = new THREE.TubeGeometry(curve, pts.length, isSelected ? ORBIT_LINE_RADIUS * 1.5 : ORBIT_LINE_RADIUS, 6, true);
+            // Segments are open polylines (a closed ellipse repeats its first point at the end).
+            const curve    = new THREE.CatmullRomCurve3(pts, false);
+            const tubeGeo  = new THREE.TubeGeometry(curve, pts.length, isSelected ? ORBIT_LINE_RADIUS * 1.5 : ORBIT_LINE_RADIUS, 6, false);
             orbitGroup.add(new THREE.Mesh(tubeGeo, new THREE.MeshBasicMaterial({
               color:       isSelected ? 0x3ddc84 : 0x999999,
               transparent: true,
               opacity:     isSelected ? 0.9 : 0.6
             })));
-          }
+          });
         }
       });
     }
@@ -758,6 +646,7 @@
     const detailPanelEl  = document.getElementById("detail-panel");
 
     let timerId    = null;
+    let objectsById = {};    // all objects by id (orbit legs may be relative to non-Earth parents)
     let earthObj   = null;   // the Earth SpaceObject, or null until telemetry arrives
     let sunObj     = null;   // the Sun SpaceObject, used only to aim sunLight
     let spacecraft = [];     // objects whose parentId === earthObj.id
@@ -816,6 +705,7 @@
           .toISOString().replace("T", " ").slice(0, 19) + " UTC";
       }
 
+      objectsById = Object.fromEntries(objects.map(o => [o.id, o]));
       earthObj = objects.find(o => o.id === EARTH_ID) ?? null;
       sunObj   = objects.find(o => o.id === SUN_ID) ?? null;
       spacecraft = earthObj
@@ -836,6 +726,7 @@
         const res  = await fetch("/api/objects");
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
+        await refreshOrbits(data.objects ?? []);
         render(data);
         statusEl.className   = "ok";
         statusEl.textContent = earthObj ? "Live" : "Live (waiting for Earth)";
