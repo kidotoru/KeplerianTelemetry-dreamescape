@@ -1,9 +1,10 @@
 package net.keplerian.telemetry.api;
 
+import net.keplerian.telemetry.model.SelectedHistoryResponse;
 import net.keplerian.telemetry.model.SpaceObject;
 import net.keplerian.telemetry.model.TelemetryResponse;
+import net.keplerian.telemetry.store.SelectedHistory;
 import net.keplerian.telemetry.store.TelemetryStore;
-import net.keplerian.telemetry.websocket.KsdWebSocketHandler;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -18,11 +19,11 @@ import java.util.Collection;
 public class TelemetryRestController {
 
     private final TelemetryStore store;
-    private final KsdWebSocketHandler ksdWebSocketHandler;
+    private final SelectedHistory selectedHistory;
 
-    public TelemetryRestController(TelemetryStore store, KsdWebSocketHandler ksdWebSocketHandler) {
+    public TelemetryRestController(TelemetryStore store, SelectedHistory selectedHistory) {
         this.store = store;
-        this.ksdWebSocketHandler = ksdWebSocketHandler;
+        this.selectedHistory = selectedHistory;
     }
 
     /**
@@ -30,7 +31,6 @@ public class TelemetryRestController {
      */
     @GetMapping("/objects")
     public TelemetryResponse getAll(@RequestParam(defaultValue = "false") boolean orbits) {
-        ksdWebSocketHandler.requestObjectList();
         Collection<SpaceObject> objects = store.getAll();
         if (!orbits) {
             objects = objects.stream().map(SpaceObject::withoutOrbitLegs).toList();
@@ -41,6 +41,14 @@ public class TelemetryRestController {
     /**
      * @param orbits true のとき軌道線（orbitLegs）も返す。省略時は orbitRev だけを返す
      */
+    /**
+     * KSD で選択中の宇宙機の対地速度・高度の履歴（選択からの経過時間つき、直近1000秒ぶん）
+     */
+    @GetMapping("/history")
+    public SelectedHistoryResponse getHistory() {
+        return selectedHistory.snapshot();
+    }
+
     @GetMapping("/objects/{id}")
     public ResponseEntity<SpaceObject> getById(@PathVariable long id,
                                                @RequestParam(defaultValue = "false") boolean orbits) {

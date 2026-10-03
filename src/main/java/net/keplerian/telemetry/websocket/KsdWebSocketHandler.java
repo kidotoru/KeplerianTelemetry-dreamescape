@@ -5,10 +5,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import net.keplerian.telemetry.model.ObjectInfoMessage;
 import net.keplerian.telemetry.model.SpaceObjectInput;
 import net.keplerian.telemetry.model.TelemetryMessage;
+import net.keplerian.telemetry.store.SelectedHistory;
 import net.keplerian.telemetry.store.TelemetryStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.lang.NonNull;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
@@ -33,27 +35,34 @@ public class KsdWebSocketHandler extends TextWebSocketHandler {
 
     private final ObjectMapper objectMapper;
     private final TelemetryStore store;
+    private final SelectedHistory selectedHistory;
     private final Set<WebSocketSession> sessions = new CopyOnWriteArraySet<>();
 
-    public KsdWebSocketHandler(ObjectMapper objectMapper, TelemetryStore store) {
+    public KsdWebSocketHandler(ObjectMapper objectMapper, TelemetryStore store, SelectedHistory selectedHistory) {
         this.objectMapper = objectMapper;
         this.store = store;
+        this.selectedHistory = selectedHistory;
     }
 
     @Override
     public void afterConnectionEstablished(@NonNull WebSocketSession session) throws Exception {
         sessions.add(session);
         log.info("KSD connected: {}", session.getId());
-        session.sendMessage(new TextMessage(QUERY_OBJECTS));
+        send(session, QUERY_OBJECTS);
         log.debug("Sent QueryObjects to {}", session.getId());
-        requestObjectList();
+        requestTelemetry();
     }
 
-    public void requestObjectList() {
+    /**
+     * 1秒ごとに KSD へテレメトリを要求する。選択中の宇宙機の履歴（SelectedHistory）を、
+     * ダッシュボードが開かれているかどうかに関係なく途切れずに記録するため
+     */
+    @Scheduled(fixedRate = 1000)
+    public void requestTelemetry() {
         for (WebSocketSession session : sessions) {
             if (!session.isOpen()) continue;
             try {
-                session.sendMessage(new TextMessage(QUERY_TELEMETRY));
+                send(session, QUERY_TELEMETRY);
                 log.debug("Sent QueryTelemetry (scheduled) to {}", session.getId());
             } catch (Exception e) {
                 log.warn("Failed to send QueryTelemetry to {}: {}", session.getId(), e.getMessage());
@@ -80,9 +89,17 @@ public class KsdWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
+    // WebSocketSession は同時送信に対応していない（スケジューラと接続確立時のスレッドから送りうる）
+    private static void send(WebSocketSession session, String payload) throws java.io.IOException {
+        synchronized (session) {
+            session.sendMessage(new TextMessage(payload));
+        }
+    }
+
     private void handleTelemetry(TelemetryMessage msg) {
-        store.setCurrentTime(msg.currentTime());
+        store.setCurrentTime((long) msg.currentTime());
         store.setSelectedId(msg.selectedId());
+        selectedHistory.record(msg.selectedId(), msg.currentTime(), msg.selectedState());
         for (SpaceObjectInput o : msg.spaceObjects()) {
             store.putTelemetry(o.id(), o.cart(), o.kep(), o.orbitRev(), o.orbitLegs());
         }

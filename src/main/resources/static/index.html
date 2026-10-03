@@ -35,6 +35,21 @@
 
     #detail-panel { pointer-events: auto; }
 
+    /* ── Flight chart (selected spacecraft: surface speed / altitude vs time) ── */
+    #flight-chart {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      width: min(42vw, 680px);
+      aspect-ratio: 5 / 3;
+      background: rgba(28, 44, 68, 0.82);
+      border: 1px solid rgba(60, 90, 130, 0.6);
+      pointer-events: none;
+      display: none;
+      z-index: 11;
+    }
+
+    #flight-chart canvas { width: 100%; height: 100%; display: block; }
 
     /* ── Layout ── */
     .layout {
@@ -123,6 +138,8 @@
 <body>
 
   <div id="canvas-wrap"></div>
+
+  <div id="flight-chart"><canvas id="flight-chart-canvas"></canvas></div>
 
   <div id="ui">
     <div class="layout">
@@ -609,13 +626,152 @@
       updateScene();
     }
 
+    // ── Flight chart ──────────────────────────────────────────────────────────
+    // Surface speed and altitude of the spacecraft selected in KSD, against
+    // in-game time since it was selected. The server keeps the history (and
+    // restarts it when the selection changes); this only draws it.
+    const CHART_SPEED_MAX_KMS = 10;  // left axis, fixed
+    const CHART_ALT_MAX_KM    = 600; // right axis, fixed
+    const CHART_SPEED_COLOR   = '#eef3fa';
+    const CHART_ALT_COLOR     = '#e08080';
+    const CHART_AXIS_COLOR    = 'rgba(200, 216, 240, 0.85)';
+    const CHART_GRID_COLOR    = 'rgba(200, 216, 240, 0.12)';
+    const flightChartEl     = document.getElementById('flight-chart');
+    const flightChartCanvas = document.getElementById('flight-chart-canvas');
+    let lastHistory = null;
+
+    // Time axis: 0–100 s, then 0–1000 s, then a sliding window of the latest 1000 s
+    function chartTimeRange(lastT) {
+      if (lastT <= 100)  return [0, 100];
+      if (lastT <= 1000) return [0, 1000];
+      return [lastT - 1000, lastT];
+    }
+
+    function drawFlightChart(history) {
+      const samples = history?.samples ?? [];
+      if (history?.selectedId == null || samples.length === 0) {
+        flightChartEl.style.display = 'none';
+        return;
+      }
+      flightChartEl.style.display = 'block';
+
+      const dpr = window.devicePixelRatio || 1;
+      const w = flightChartCanvas.clientWidth;
+      const h = flightChartCanvas.clientHeight;
+      if (flightChartCanvas.width !== Math.round(w * dpr) || flightChartCanvas.height !== Math.round(h * dpr)) {
+        flightChartCanvas.width  = Math.round(w * dpr);
+        flightChartCanvas.height = Math.round(h * dpr);
+      }
+      const ctx = flightChartCanvas.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+
+      const fontPx = Math.max(10, Math.round(h / 24));
+      const pad = { left: fontPx * 5.2, right: fontPx * 5.2, top: fontPx * 1.2, bottom: fontPx * 3.4 };
+      const pw = w - pad.left - pad.right;
+      const ph = h - pad.top - pad.bottom;
+      const [t0, t1] = chartTimeRange(samples[samples.length - 1].t);
+      const xOf    = t => pad.left + (t - t0) / (t1 - t0) * pw;
+      const ySpeed = kms => pad.top + ph - kms / CHART_SPEED_MAX_KMS * ph;
+      const yAlt   = km  => pad.top + ph - km / CHART_ALT_MAX_KM * ph;
+
+      ctx.font = `bold ${fontPx}px "Courier New", monospace`;
+      ctx.lineWidth = 1;
+
+      // Horizontal grid + both y-axis labels (5 divisions: 2 km/s, 120 km)
+      ctx.textBaseline = 'middle';
+      for (let k = 0; k <= 5; k++) {
+        const y = pad.top + ph - (k / 5) * ph;
+        ctx.strokeStyle = CHART_GRID_COLOR;
+        ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + pw, y); ctx.stroke();
+        ctx.fillStyle = CHART_SPEED_COLOR;
+        ctx.textAlign = 'right';
+        ctx.fillText((k * CHART_SPEED_MAX_KMS / 5).toFixed(1), pad.left - fontPx * 0.5, y);
+        ctx.fillStyle = CHART_ALT_COLOR;
+        ctx.textAlign = 'left';
+        ctx.fillText(String(k * CHART_ALT_MAX_KM / 5), pad.left + pw + fontPx * 0.5, y);
+      }
+
+      // Time ticks: every 10 s on the 100 s scale, every 100 s otherwise
+      const step = (t1 - t0) <= 100 ? 10 : 100;
+      const labelEvery = (t1 - t0) <= 100 ? 20 : 100;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = CHART_AXIS_COLOR;
+      for (let t = Math.ceil(t0 / step) * step; t <= t1 + 1e-9; t += step) {
+        const x = xOf(t);
+        ctx.strokeStyle = CHART_AXIS_COLOR;
+        ctx.beginPath(); ctx.moveTo(x, pad.top + ph); ctx.lineTo(x, pad.top + ph + fontPx * 0.4); ctx.stroke();
+        if (Math.round(t) % labelEvery === 0) {
+          ctx.fillText(String(Math.round(t)), x, pad.top + ph + fontPx * 0.6);
+        }
+      }
+
+      // Axes
+      ctx.strokeStyle = CHART_AXIS_COLOR;
+      ctx.beginPath();
+      ctx.moveTo(pad.left, pad.top); ctx.lineTo(pad.left, pad.top + ph);
+      ctx.lineTo(pad.left + pw, pad.top + ph); ctx.lineTo(pad.left + pw, pad.top);
+      ctx.stroke();
+
+      // Axis titles
+      ctx.font = `bold ${Math.round(fontPx * 1.05)}px "Courier New", monospace`;
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = CHART_AXIS_COLOR;
+      ctx.fillText('TIME [sec]', pad.left + pw / 2, pad.top + ph + fontPx * 2.3);
+      ctx.save();
+      ctx.translate(fontPx * 1.1, pad.top + ph / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillStyle = CHART_SPEED_COLOR;
+      ctx.fillText('SURFACE VELOCITY [km/s]', 0, 0);
+      ctx.restore();
+      ctx.save();
+      ctx.translate(w - fontPx * 1.1, pad.top + ph / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillStyle = CHART_ALT_COLOR;
+      ctx.fillText('ALTITUDE [km]', 0, 0);
+      ctx.restore();
+
+      // Data lines, clipped to the plot area (values beyond the fixed maxima run off the top)
+      ctx.save();
+      ctx.beginPath(); ctx.rect(pad.left, pad.top, pw, ph); ctx.clip();
+      ctx.lineWidth = 2;
+      ctx.lineJoin = 'round';
+      const plot = (color, yOf) => {
+        ctx.strokeStyle = color;
+        ctx.beginPath();
+        samples.forEach((p, i) => {
+          const x = xOf(p.t), y = yOf(p);
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+      };
+      plot(CHART_ALT_COLOR,   p => yAlt(p.altitude / 1000));
+      plot(CHART_SPEED_COLOR, p => ySpeed(p.surfaceSpeed / 1000));
+      ctx.restore();
+    }
+
+    window.addEventListener('resize', () => drawFlightChart(lastHistory));
+
+    async function fetchHistory() {
+      try {
+        const res = await fetch("/api/history");
+        if (res.ok) lastHistory = await res.json();
+      } catch (e) {
+        console.warn(`[history] ${e.message}`);
+      }
+      drawFlightChart(lastHistory);
+    }
+
     async function poll() {
       try {
+        const historyDone = fetchHistory();
         const res  = await fetch("/api/objects");
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         await refreshOrbits(data.objects ?? []);
         render(data);
+        await historyDone;
       } catch (e) {
         console.warn(`[poll] ${e.message}`);
       }

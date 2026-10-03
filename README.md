@@ -97,6 +97,7 @@ target\dist\KeplerianTelemetry\start.bat
 - 選択したオブジェクトの直交座標要素（地球相対）・ケプラー要素の表示
 - 実際の太陽の方向から照らした地球
 - KSD 本体と同じ軌道線の描画（`orbitRev` が変わったオブジェクトだけ `?orbits=true` で取り直す）
+- KSD で選択中の宇宙機の対地速度・高度のグラフ（`GET /api/history`。横軸は選択からのゲーム内経過時間で、100 秒 → 1000 秒 → 直近 1000 秒のスライド表示。縦軸は速度 0〜10 km/s、高度 0〜600 km の固定）
 - REST API を 1 秒ごと（固定）にポーリングして自動更新
 
 ### カスタムクライアントの実装
@@ -106,7 +107,7 @@ target\dist\KeplerianTelemetry\start.bat
 - **データ取得:** `GET /api/objects` を任意の間隔でポーリングする
 - **単体取得:** `GET /api/objects/{id}` で特定オブジェクトのみ取得できる
 - **軌道線:** 通常のレスポンスには軌道線の版 `orbitRev` だけが入る。初回と、`orbitRev` が前回取得時から変わったオブジェクトだけ `?orbits=true` を付けて軌道線（`orbitLegs`）を取得する。描画は「親天体の `pos` ＋ 各点」を結ぶだけでよい（[軌道線の描き方](#軌道線の描き方)）
-- **ポーリングの副作用:** `GET /api/objects` を呼び出すたびにサーバが KSD へ `QueryTelemetry` を送信するため、ポーリング間隔がそのままテレメトリの更新頻度になる
+- **更新頻度:** サーバは KSD 接続中、1 秒ごとに KSD へ `QueryTelemetry` を送ってテレメトリを更新する。REST の呼び出しは KSD への問い合わせを伴わず、サーバが保持している最新値を返す
 
 WebSocket への直接接続は不要で、REST API だけで完結する。`index.html` を `static/` フォルダに置けばサーバから配信されるが、別ホストで動かして CORS なしで利用することも可能（サーバは全オリジンを許可している）。
 
@@ -133,9 +134,8 @@ KSD                                  サーバ
     |                                   |
     |--- Telemetry -------------------->|  テレメトリを返す
     |                                   |
-    :  以降、REST API の /api/objects 呼  :
-    :  び出しごとに QueryTelemetry が    :
-    :  送信される                        :
+    :  以降、サーバが 1 秒ごとに         :
+    :  QueryTelemetry を送信する          :
 ```
 
 KSD は軌道線（`orbitRev` / `orbitLegs`）を、**接続後の最初の `Telemetry` では全オブジェクト分**、以降は**前回送った内容から変わったオブジェクトだけ**送る。
@@ -157,7 +157,7 @@ KSD は軌道線（`orbitRev` / `orbitLegs`）を、**接続後の最初の `Tel
 
 #### QueryTelemetry
 
-テレメトリ（`Telemetry`）を要求する。接続確立時および REST `/api/objects` 呼び出し時にKSDへ送信される。
+テレメトリ（`Telemetry`）を要求する。接続確立時と、以降 1 秒ごとにKSDへ送信される。
 
 ```json
 {
@@ -221,6 +221,7 @@ KSD は軌道線（`orbitRev` / `orbitLegs`）を、**接続後の最初の `Tel
   "messageType": "Telemetry",
   "currentTime": 1609459200,
   "selectedId": 3,
+  "selectedState": { "surfaceSpeed": 7650.2, "altitude": 412000.5 },
   "spaceObjects": [
     {
       "id": 3,
@@ -256,6 +257,9 @@ KSD は軌道線（`orbitRev` / `orbitLegs`）を、**接続後の最初の `Tel
 | `messageType` | string | 固定値 `"Telemetry"` |
 | `currentTime` | number | シミュレーション時刻（Unix 秒） |
 | `selectedId` | number \| null | KSD で選択中のオブジェクト ID。選択は常に1つだけ。未選択なら `null` |
+| `selectedState` | object \| null | 選択中の宇宙機の飛行状態。宇宙機以外が選択されているとき・未選択なら `null` |
+| `selectedState.surfaceSpeed` | number | 対地速度（m/s）。親天体の自転と共回転する座標系での速さで、地上では 0 |
+| `selectedState.altitude` | number | 親天体の基準半径からの高度（メートル） |
 | `spaceObjects[].id` | number | オブジェクト ID |
 | `spaceObjects[].cart.pos` | Vector3 | 位置（メートル） |
 | `spaceObjects[].cart.vel` | Vector3 | 親天体に対する相対速度（m/s）。座標軸は `pos` と同じ |
@@ -284,7 +288,7 @@ KSD は軌道線（`orbitRev` / `orbitLegs`）を、**接続後の最初の `Tel
 ### GET /api/objects
 
 登録されているすべての宇宙オブジェクトの情報とテレメトリを取得する。  
-呼び出しと同時に、KSDへ `QueryTelemetry` が送信される。
+KSD への問い合わせは行わず、サーバが保持している最新値を返す。
 
 **リクエスト**
 
@@ -347,6 +351,36 @@ GET /api/objects?orbits=true
   ]
 }
 ```
+
+---
+
+### GET /api/history
+
+KSD で選択中の宇宙機の、対地速度と高度の履歴を取得する。
+
+- 選択が切り替わると、サーバは保持していた履歴を破棄して記録し直す
+- 記録はサーバが KSD からテレメトリを受け取るたび（1 秒ごと）。ダッシュボードを開いていなくても記録される
+- 直近 1000 秒（ゲーム内時刻）ぶんだけ保持する。ゲーム内時刻が巻き戻ったら記録し直す
+- 宇宙機以外が選択されているとき・未選択のときは `samples` が空
+
+**レスポンス（200 OK）**
+
+```json
+{
+  "selectedId": 100102,
+  "samples": [
+    { "t": 0.0, "surfaceSpeed": 0.0,   "altitude": 21.3 },
+    { "t": 1.0, "surfaceSpeed": 12.4,  "altitude": 27.9 }
+  ]
+}
+```
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `selectedId` | number \| null | 履歴の対象（KSD で選択中のオブジェクト ID） |
+| `samples[].t` | number | 記録開始（選択）からのゲーム内経過時間（秒） |
+| `samples[].surfaceSpeed` | number | 対地速度（m/s） |
+| `samples[].altitude` | number | 高度（メートル） |
 
 ---
 
