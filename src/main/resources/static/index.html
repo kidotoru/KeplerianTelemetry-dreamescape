@@ -743,9 +743,12 @@
     //  2. Follow the rocket: each telemetry update moves the target and the camera
     //     by the rocket's displacement.
     //  3. Above LAUNCH_PITCH_ALT_KM, lower the pitch from 90° to LAUNCH_SIDE_PITCH
-    //     so the trajectory is seen obliquely from the side.
-    //  4. On orbit insertion, pull back (same viewing direction) to LAUNCH_ORBIT_DIST
-    //     so the whole orbit comes into view.
+    //     so the trajectory is seen obliquely from the side. The side it swings out to
+    //     (the yaw) is perpendicular to the current flight plane — the horizontal
+    //     direction of the inertial velocity — so a near-polar launch is seen from the
+    //     east / west rather than from along its track.
+    //  4. On orbit insertion, pull back to LAUNCH_ORBIT_DIST while lowering the pitch
+    //     to 0° (looking along the flight plane's normal), so the orbit is seen face-on.
     // All moves are gradual. The viewer may still drag / zoom meanwhile; the
     // automatic moves carry on regardless, easing the camera back onto its path
     // rather than snapping it there.
@@ -756,7 +759,7 @@
     const LAUNCH_SIDE_PITCH    = THREE.MathUtils.degToRad(30); // pitch after pitching down
     const LAUNCH_PITCH_RATE    = THREE.MathUtils.degToRad(20); // per second → 3 s from 90° to 30°
     const LAUNCH_CAM_SMOOTHING = 3.0; // 1/s: how quickly the camera eases onto its pitch-down path
-    const LAUNCH_ORBIT_DIST    = 50.0; // camera distance after orbit insertion (50,000 km)
+    const LAUNCH_ORBIT_DIST    = 30.0; // camera distance after orbit insertion (30,000 km)
     const LAUNCH_PULL_RATE     = 0.8;  // 1/s: how quickly it pulls back (roughly 4 s to get there)
     let cameraGoal = null;
     // { id, last: rocket position, up: local vertical, side: horizontal direction the camera
@@ -826,8 +829,18 @@
       if (!launchCam.pitching && altKm >= LAUNCH_PITCH_ALT_KM) {
         launchCam.pitching = true;
       }
+      if (launchCam.pitching && !launchCam.settled) {
+        // Yaw: swing out perpendicular to the flight plane, keeping downrange to the right.
+        // Re-evaluated while pitching; the camera eases onto the path, so it turns smoothly.
+        const h = downrangeOf(st);
+        h.addScaledVector(launchCam.up, -h.dot(launchCam.up));
+        if (h.lengthSq() > 1e-9) {
+          launchCam.side = new THREE.Vector3().crossVectors(h.normalize(), launchCam.up).normalize();
+        }
+      }
       if (!launchCam.pulling && inOrbit === true) {
         launchCam.pulling = true;
+        launchCam.pullDist = camera.position.distanceTo(controls.target);
         launchCam.settled = true; // the pitch-down (if still going) stops here; the pull-back takes over
         cameraGoal = null;
       }
@@ -837,11 +850,15 @@
     // keeping its viewing direction, until it is LAUNCH_ORBIT_DIST away
     function stepOrbitPull(dt) {
       if (!launchCam?.pulling || launchCam.pulled) return;
-      const offset = camera.position.clone().sub(controls.target);
-      const dist = offset.length();
-      const next = THREE.MathUtils.lerp(dist, LAUNCH_ORBIT_DIST, 1 - Math.exp(-LAUNCH_PULL_RATE * dt));
-      camera.position.copy(controls.target).addScaledVector(offset.normalize(), next);
-      if (Math.abs(LAUNCH_ORBIT_DIST - next) < 1e-3) {
+      // Pitch down to 0° at the same rate as the launch pitch-down, and ease the distance out
+      launchCam.pitch = Math.max(0, launchCam.pitch - LAUNCH_PITCH_RATE * dt);
+      // The distance eases on its own (not from the camera's actual, lagging distance)
+      launchCam.pullDist = THREE.MathUtils.lerp(launchCam.pullDist, LAUNCH_ORBIT_DIST, 1 - Math.exp(-LAUNCH_PULL_RATE * dt));
+      const dir = launchCam.side.clone().multiplyScalar(Math.cos(launchCam.pitch)).addScaledVector(launchCam.up, Math.sin(launchCam.pitch));
+      const goal = controls.target.clone().addScaledVector(dir, launchCam.pullDist);
+      // Ease onto the path rather than jumping, in case the viewer has moved the camera
+      camera.position.lerp(goal, 1 - Math.exp(-LAUNCH_CAM_SMOOTHING * dt));
+      if (launchCam.pitch <= 0 && Math.abs(LAUNCH_ORBIT_DIST - launchCam.pullDist) < 1e-3 && camera.position.distanceTo(goal) < 1e-3) {
         launchCam.pulled = true; // done; from here on only the follow translation applies
       }
     }
