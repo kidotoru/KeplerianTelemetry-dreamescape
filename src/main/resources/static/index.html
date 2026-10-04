@@ -83,7 +83,7 @@
       width: var(--chart-width);
       height: calc(var(--chart-width) / 2);
       padding: 12px 18px;
-      display: none;               /* shown while KSD has a spacecraft selected */
+      display: flex;
       flex-direction: column;
     }
     #ground-track {
@@ -145,7 +145,6 @@
       background: var(--panel-bg);
       border: 1px solid var(--panel-border);
       pointer-events: none;
-      display: none;
       z-index: 11;
     }
 
@@ -1064,13 +1063,14 @@
       return lastT <= sc.span ? [0, sc.span, sc] : [lastT - sc.span, lastT, sc];
     }
 
+    // Always shown. While something other than a spacecraft is selected (no samples),
+    // keep drawing the last spacecraft's history; before any, just the empty axes.
+    let lastChartSamples = [];
     function drawFlightChart(history) {
-      const samples = history?.samples ?? [];
-      if (history?.selectedId == null || samples.length === 0) {
-        flightChartEl.style.display = 'none';
-        return;
+      if (history?.samples?.length) {
+        lastChartSamples = history.samples;
       }
-      flightChartEl.style.display = 'block';
+      const samples = lastChartSamples;
 
       const dpr = window.devicePixelRatio || 1;
       const w = flightChartCanvas.clientWidth;
@@ -1087,7 +1087,7 @@
       const pad = { left: fontPx * 5.2, right: fontPx * 5.2, top: fontPx * 1.2, bottom: fontPx * 3.4 };
       const pw = w - pad.left - pad.right;
       const ph = h - pad.top - pad.bottom;
-      const [t0, t1, timeScale] = chartTimeRange(samples[samples.length - 1].t);
+      const [t0, t1, timeScale] = chartTimeRange(samples.length ? samples[samples.length - 1].t : 0);
       const speedScale = pickScale(CHART_SPEED_SCALES, Math.max(...samples.map(p => p.surfaceSpeed)) / 1000);
       const altScale   = pickScale(CHART_ALT_SCALES,   Math.max(...samples.map(p => p.altitude)) / 1000);
       const xOf    = t => pad.left + (t - t0) / (t1 - t0) * pw;
@@ -1275,18 +1275,31 @@
       return `T${sign} ${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
     }
 
+    // Always shown. While something other than a spacecraft is selected, keep showing
+    // the last spacecraft (its clock keeps running); before any, a blank clock.
+    let lastMission = null; // { id, name, launchTime, log }
+
     function updateMissionPanel(data) {
-      const id = data.selectedId;
-      if (id == null || data.selectedLaunchTime == null || data.currentTime == null) {
-        missionPanelEl.style.display = "none";
+      if (data.selectedId != null && data.selectedLaunchTime != null) {
+        lastMission = {
+          id: data.selectedId,
+          name: objectsById[data.selectedId]?.name ?? String(data.selectedId),
+          launchTime: data.selectedLaunchTime,
+          log: data.selectedFlightLog ?? [],
+        };
+      }
+      if (!lastMission || data.currentTime == null) {
+        missionCaptionEl.textContent = "MISSION ELAPSED TIME";
+        metEl.textContent = "T+ --:--:--";
+        eventLogEl.replaceChildren();
+        shownEvents = { id: null, count: 0 };
         return;
       }
-      missionPanelEl.style.display = "flex";
-      const name = objectsById[id]?.name ?? String(id);
-      missionCaptionEl.textContent = `MISSION ELAPSED TIME — ${name}`;
-      metEl.textContent = fmtMet(data.currentTime - data.selectedLaunchTime);
+      const id = lastMission.id;
+      missionCaptionEl.textContent = `MISSION ELAPSED TIME — ${lastMission.name}`;
+      metEl.textContent = fmtMet(data.currentTime - lastMission.launchTime);
 
-      const log = data.selectedFlightLog ?? [];
+      const log = lastMission.log;
       if (shownEvents.id !== id || shownEvents.count !== log.length) {
         const firstNew = shownEvents.id === id ? shownEvents.count : log.length; // don't flash a whole log on selection
         eventLogEl.replaceChildren(...log.map((e, i) => {
