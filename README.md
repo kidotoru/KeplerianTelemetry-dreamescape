@@ -100,6 +100,7 @@ target\dist\KeplerianTelemetry\start.bat
 - KSD で選択中の宇宙機の対地速度・高度のグラフ（`GET /api/history`。画面左下に表示。横軸は選択からのゲーム内経過時間で、100 秒 → 300 秒 → 600 秒 → 1000 秒 → 直近 1000 秒のスライド表示。縦軸は表示中の値が収まる最小のスケールを選び、速度は 2.5 → 5 → 10 km/s、高度は 100 → 300 → 600 km と切り替わる（上限を超えた値はグラフの上端で切れる）。目盛りは左右とも最大値の 5 等分で、横線を共有する）
 - KSD で選択中の宇宙機の過去の軌跡（`GET /api/track`。軌道投入前のみ。地表に固定した座標で描くので、地球が自転しても射点から地表に沿って伸びる）
 - KSD で選択が変わると、画面側の選択と注視点もその機体（または地球）に合わせる。次に KSD で選択が変わるまでは、画面上で別の機体を選べる
+- 選ばれたのが軌道投入前の宇宙機（打ち上げ中など）なら、カメラが自動で機体を追う。最初は地球中心・機体・カメラが一直線に並ぶ真上（高度約 7000 km）から見下ろし（射程方向が画面右）、高度 60 km を超えるとピッチ 30 度までピッチダウンして、飛行の軌跡を斜め横から見る。移動はすべて連続的で、画面をドラッグ・ズームしても自動制御は続く
 - REST API を 1 秒ごと（固定）にポーリングして自動更新
 
 ### カスタムクライアントの実装
@@ -314,6 +315,7 @@ GET /api/objects?orbits=true
 {
   "currentTime": 1609459200,
   "selectedId": 3,
+  "selectedInOrbit": null,
   "objects": [
     {
       "id": 1,
@@ -404,6 +406,7 @@ KSD で選択中の宇宙機の過去の軌跡を取得する。KSD の実績軌
 ```json
 {
   "selectedId": 100102,
+  "inOrbit": false,
   "samples": [
     { "t": 1792851981.0, "parentId": 4, "fixed": { "x": -3608123.4, "y": 4150321.9, "z": 3226471.3 } }
   ]
@@ -413,6 +416,7 @@ KSD で選択中の宇宙機の過去の軌跡を取得する。KSD の実績軌
 | フィールド | 型 | 説明 |
 |---|---|---|
 | `selectedId` | number \| null | 軌跡の対象（KSD で選択中のオブジェクト ID） |
+| `inOrbit` | boolean \| null | 選択中の宇宙機が周回軌道上か（最新値）。宇宙機以外の選択・未選択なら `null` |
 | `samples[].t` | number | ゲーム内時刻（Unix 秒） |
 | `samples[].parentId` | number | 記録時の親天体 ID |
 | `samples[].fixed` | Vector3 | 親天体からの相対位置を、親天体の向き（`primeMeridian`, `east`, `north` の3軸）で表した成分（メートル） |
@@ -502,6 +506,7 @@ GET /api/objects/3?orbits=true
 |---|---|---|
 | `currentTime` | Long | 現在のシミュレーション時刻（Unix 秒） |
 | `selectedId` | Long \| null | KSD で選択中のオブジェクト ID。未選択なら `null` |
+| `selectedInOrbit` | Boolean \| null | 選択中の宇宙機が周回軌道上か（`selectedId` と同じ時点の値）。宇宙機以外の選択・未選択なら `null` |
 | `objects` | SpaceObject[] | 全オブジェクトの配列 |
 
 ### SpaceObject

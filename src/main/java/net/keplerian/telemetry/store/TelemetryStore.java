@@ -18,7 +18,9 @@ public class TelemetryStore {
 
     private final Map<Long, SpaceObject> objects = new ConcurrentHashMap<>();
     private volatile Long currentTime = null;
-    private volatile Long selectedId = null;
+    /** KSD で選択中の ID と、その宇宙機が周回軌道上か。別々に読むと食い違いうるので1つにまとめて差し替える */
+    public record Selection(Long id, Boolean inOrbit) {}
+    private volatile Selection selection = new Selection(null, null);
 
     public void setCurrentTime(long currentTime) {
         this.currentTime = currentTime;
@@ -28,12 +30,12 @@ public class TelemetryStore {
         return currentTime;
     }
 
-    public void setSelectedId(Long selectedId) {
-        this.selectedId = selectedId;
+    public void setSelection(Long selectedId, Boolean inOrbit) {
+        this.selection = new Selection(selectedId, inOrbit);
     }
 
-    public Long getSelectedId() {
-        return selectedId;
+    public Selection getSelection() {
+        return selection;
     }
 
     public void putTelemetry(long id,

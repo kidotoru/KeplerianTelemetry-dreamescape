@@ -212,11 +212,33 @@
     camera.position.set(0, 14, 20);
     camera.lookAt(0, 0, 0);
 
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.06;
-    controls.minDistance   = EARTH_RADIUS_FALLBACK * SCALE * 1.05;
-    controls.maxDistance   = 500;
+    function createControls() {
+      const c = new OrbitControls(camera, renderer.domElement);
+      c.enableDamping = true;
+      c.dampingFactor = 0.06;
+      c.minDistance   = EARTH_RADIUS_FALLBACK * SCALE * 1.05;
+      c.maxDistance   = 500;
+      return c;
+    }
+    let controls = createControls();
+    const SCENE_UP = new THREE.Vector3(0, 1, 0);
+
+    // Which way is "up" on screen (the axis the viewer orbits around). OrbitControls
+    // bakes camera.up in when it's constructed, so changing it means rebuilding the controls.
+    function setCameraUp(up) {
+      if (camera.up.distanceTo(up) < 1e-6) return;
+      rebuildControls(up);
+    }
+
+    function rebuildControls(up) {
+      const target = controls.target.clone();
+      const minDistance = controls.minDistance;
+      controls.dispose();
+      camera.up.copy(up);
+      controls = createControls();
+      controls.target.copy(target);
+      controls.minDistance = minDistance;
+    }
 
     window.addEventListener('resize', () => {
       renderer.setSize(window.innerWidth, window.innerHeight);
@@ -578,6 +600,9 @@
     let targetGoal = null;
 
     function focusOn(id) {
+      launchCam  = null;
+      cameraGoal = null;
+      setCameraUp(SCENE_UP);
       if (id === EARTH_MARKER_ID) {
         targetGoal = new THREE.Vector3(0, 0, 0);
         controls.minDistance = earthRadius * SCALE * 1.05;
@@ -590,6 +615,109 @@
       controls.minDistance = (obj.radius != null && obj.radius > 0)
         ? obj.radius * 2 * SCALE
         : 0.02;
+    }
+
+    // ── Launch camera ─────────────────────────────────────────────────────────
+    // When KSD selects a spacecraft that isn't in orbit yet:
+    //  1. Move the target onto the rocket and the camera straight above it
+    //     (pitch 90°: Earth centre → rocket → camera on one line, looking down),
+    //     with the rocket's local vertical as the camera's up axis.
+    //  2. Follow the rocket: each telemetry update moves the target and the camera
+    //     by the rocket's displacement.
+    //  3. Above LAUNCH_PITCH_ALT_KM, lower the pitch from 90° to LAUNCH_SIDE_PITCH
+    //     so the trajectory is seen obliquely from the side.
+    // All moves are gradual. The viewer may still drag / zoom meanwhile; the
+    // automatic moves carry on regardless, easing the camera back onto its path
+    // rather than snapping it there.
+    // Distances are in scene units (1 unit = 1000 km).
+    const LAUNCH_CAM_TOP_DIST  = 7.0; // camera distance at pitch 90° (straight above)
+    const LAUNCH_CAM_SIDE_DIST = 3.0; // camera distance at pitch 0° (beside the trajectory)
+    const LAUNCH_PITCH_ALT_KM  = 60;
+    const LAUNCH_SIDE_PITCH    = THREE.MathUtils.degToRad(30); // pitch after pitching down
+    const LAUNCH_PITCH_RATE    = THREE.MathUtils.degToRad(20); // per second → 3 s from 90° to 30°
+    const LAUNCH_CAM_SMOOTHING = 3.0; // 1/s: how quickly the camera eases onto its pitch-down path
+    let cameraGoal = null;
+    // { id, last: rocket position, up: local vertical, side: horizontal direction the camera
+    //   swings toward when pitching down, pitch: current pitch (rad), pitching: lowering the pitch now }
+    let launchCam = null;
+
+    // Spacecraft position (scene units, Earth-relative) and velocity (m/s, same axes) in scene coordinates
+    function craftState3(id) {
+      const obj = spacecraft.find(o => o.id === id);
+      const ePos = earthObj?.cart?.pos;
+      if (!obj?.cart?.pos || !ePos) return null;
+      const pos = toThree(obj.cart.pos.x - ePos.x, obj.cart.pos.y - ePos.y, obj.cart.pos.z - ePos.z);
+      const vel = obj.cart.vel ? dirToThree(obj.cart.vel) : new THREE.Vector3();
+      return { pos, vel };
+    }
+
+    // Horizontal flight direction: the horizontal part of the velocity, or due east when it's (nearly) zero
+    function downrangeOf(state) {
+      const up = state.pos.clone().normalize();
+      const h = state.vel.clone().addScaledVector(up, -state.vel.dot(up));
+      if (h.length() > 1.0) return h.normalize();
+      const axis = earthObj?.orientation?.north ? dirToThree(earthObj.orientation.north).normalize() : SCENE_UP.clone();
+      const east = new THREE.Vector3().crossVectors(axis, up);
+      return east.lengthSq() > 1e-9 ? east.normalize() : new THREE.Vector3(1, 0, 0);
+    }
+
+    // Camera position for a given pitch: 90° = straight above the target, 0° = level with it, off to the side
+    function launchCamPosition(pitch) {
+      const t = pitch / (Math.PI / 2);
+      const dist = THREE.MathUtils.lerp(LAUNCH_CAM_SIDE_DIST, LAUNCH_CAM_TOP_DIST, t);
+      const dir = launchCam.side.clone().multiplyScalar(Math.cos(pitch)).addScaledVector(launchCam.up, Math.sin(pitch));
+      return controls.target.clone().addScaledVector(dir, dist);
+    }
+
+    function startLaunchCamera(id) {
+      const st = craftState3(id);
+      if (!st) return false;
+      const up = st.pos.clone().normalize();
+      // Swinging toward this side when pitching down keeps downrange pointing right on screen
+      const side = new THREE.Vector3().crossVectors(downrangeOf(st), up).normalize();
+      setCameraUp(up);
+      controls.minDistance = 0.02;
+      launchCam = { id, last: st.pos.clone(), up, side, pitch: Math.PI / 2, pitching: false };
+      targetGoal = st.pos.clone();
+      // Pitch a hair under 90°: exactly straight down leaves the view's heading undefined
+      const pitch = Math.PI / 2 - 1e-3;
+      const dir = side.clone().multiplyScalar(Math.cos(pitch)).addScaledVector(up, Math.sin(pitch));
+      cameraGoal = st.pos.clone().addScaledVector(dir, LAUNCH_CAM_TOP_DIST);
+      launchCam.pitch = pitch;
+      return true;
+    }
+
+    // Called after every telemetry update: follow the rocket and start pitching down above the threshold
+    function updateLaunchCamera() {
+      if (!launchCam) return;
+      if (selectedId !== launchCam.id) { launchCam = null; return; }
+      const st = craftState3(launchCam.id);
+      if (!st) return;
+      const delta = st.pos.clone().sub(launchCam.last);
+      camera.position.add(delta);
+      controls.target.add(delta);
+      if (targetGoal) targetGoal.add(delta);
+      if (cameraGoal) cameraGoal.add(delta);
+      launchCam.last = st.pos.clone();
+
+      const altKm = (st.pos.length() / SCALE - earthRadius) / 1000;
+      if (!launchCam.pitching && altKm >= LAUNCH_PITCH_ALT_KM) {
+        launchCam.pitching = true;
+      }
+    }
+
+    // Called every frame: lower the pitch toward 0° once pitching has started
+    function stepLaunchPitch(dt) {
+      if (!launchCam?.pitching || launchCam.settled) return;
+      cameraGoal = null; // the pitch-down takes over from the initial approach
+      launchCam.pitch = Math.max(LAUNCH_SIDE_PITCH, launchCam.pitch - LAUNCH_PITCH_RATE * dt);
+      // Ease toward the path instead of jumping onto it, so a camera the viewer has
+      // moved (or one still on its way in) glides over
+      const goal = launchCamPosition(launchCam.pitch);
+      camera.position.lerp(goal, 1 - Math.exp(-LAUNCH_CAM_SMOOTHING * dt));
+      if (launchCam.pitch <= LAUNCH_SIDE_PITCH && camera.position.distanceTo(goal) < 1e-3) {
+        launchCam.settled = true; // done; from here on only the follow translation applies
+      }
     }
 
     // ── Occlusion ──────────────────────────────────────────────────────────────
@@ -619,8 +747,10 @@
     }
 
     // ── Animation loop ────────────────────────────────────────────────────────
+    const frameClock = new THREE.Clock();
     function animate() {
       requestAnimationFrame(animate);
+      const dt = Math.min(frameClock.getDelta(), 0.1);
       if (targetGoal) {
         controls.target.lerp(targetGoal, 0.08);
         if (controls.target.distanceTo(targetGoal) < 0.0001) {
@@ -628,6 +758,14 @@
           targetGoal = null;
         }
       }
+      if (cameraGoal) {
+        camera.position.lerp(cameraGoal, 0.08);
+        if (camera.position.distanceTo(cameraGoal) < 0.0001) {
+          camera.position.copy(cameraGoal);
+          cameraGoal = null;
+        }
+      }
+      stepLaunchPitch(dt);
       controls.update();
       updateOcclusion();
       renderer.render(scene, camera);
@@ -705,11 +843,15 @@
       // viewer may click another object; that choice stays until KSD selects again.
       if (data.selectedId !== lastKsdSelectedId) {
         lastKsdSelectedId = data.selectedId;
-        const followId = data.selectedId === EARTH_ID ? EARTH_MARKER_ID
+        const ksdPick = data.selectedId === EARTH_ID ? EARTH_MARKER_ID
           : spacecraft.some(o => o.id === data.selectedId) ? data.selectedId : null;
-        if (followId != null) {
-          selectedId = followId;
-          focusOn(followId);
+        if (ksdPick != null) {
+          selectedId = ksdPick;
+          // selectedInOrbit comes in the same response as selectedId, so it always describes this selection
+          const launching = ksdPick !== EARTH_MARKER_ID && data.selectedInOrbit === false;
+          if (!(launching && startLaunchCamera(ksdPick))) {
+            focusOn(ksdPick);
+          }
         }
       }
 
@@ -720,6 +862,7 @@
 
       showDetail();
       updateScene();
+      updateLaunchCamera();
     }
 
     // ── Flight chart ──────────────────────────────────────────────────────────

@@ -28,6 +28,7 @@ public class SelectedTrack {
     private static final double MIN_STEP_METERS = 1.0;
 
     private Long selectedId = null;
+    private Boolean inOrbit = null;
     private final Deque<TrackSample> samples = new ArrayDeque<>();
 
     /**
@@ -39,6 +40,7 @@ public class SelectedTrack {
             this.selectedId = selectedId;
             samples.clear();
         }
+        inOrbit = state != null ? state.inOrbit() : null;
         if (selectedId == null || state == null) {
             return;
         }
@@ -78,7 +80,7 @@ public class SelectedTrack {
     }
 
     public synchronized SelectedTrackResponse snapshot() {
-        return new SelectedTrackResponse(selectedId, new ArrayList<>(samples));
+        return new SelectedTrackResponse(selectedId, inOrbit, new ArrayList<>(samples));
     }
 
     // 親天体からの相対位置を、親天体の向き（経度0・東経90度・北極の3軸）で表した成分にする
