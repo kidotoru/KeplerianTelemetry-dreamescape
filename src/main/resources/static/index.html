@@ -35,15 +35,60 @@
 
     #detail-panel { pointer-events: auto; }
 
+    :root {
+      --chart-width: min(42vw, 680px);
+      --bottom-panel-height: calc(var(--chart-width) * 3 / 5); /* the chart is 5:3 */
+      --detail-width: 340px;
+      --panel-gap: 12px;
+      --panel-bg: rgba(28, 44, 68, 0.4);      /* shared by the chart, data feed and detail panel */
+      --panel-border: rgba(60, 90, 130, 0.5);
+    }
+
+    /* ── Data feed (bottom, between the chart and the detail panel) ── */
+    #data-feed {
+      position: fixed;
+      bottom: var(--panel-gap);
+      left: calc(var(--panel-gap) * 2 + var(--chart-width));
+      right: calc(var(--panel-gap) * 2 + var(--detail-width));
+      height: var(--bottom-panel-height);
+      border: 1px solid var(--panel-border);
+      background: var(--panel-bg);
+      padding: 10px 14px;
+      overflow: hidden;
+      z-index: 11;
+      pointer-events: none;
+      font-family: "Courier New", monospace;
+      font-size: 12px;
+      line-height: 16px;          /* must match DATA_FEED_LINE_HEIGHT */
+      color: rgba(255, 255, 255, 0.75);
+      text-shadow: 0 0 4px rgba(0, 0, 0, 0.9);
+    }
+
+    #data-feed-text { will-change: transform; }
+
+    /* One row per object. Fixed column widths keep the columns aligned on every row
+       (full-width characters in names don't render exactly 2 half-width columns wide,
+       so padding with spaces alone wouldn't line up). */
+    .feed-row {
+      display: grid;
+      grid-template-columns: 30ch repeat(3, 23ch) repeat(3, 21ch); /* name | "POS X=" + 15 + " m" | "VEL X=" + 11 + " m/s" */
+      column-gap: 1ch;
+      height: 16px;               /* exactly one line, so chunks stay a whole number of lines */
+      white-space: pre;
+      overflow: hidden;
+    }
+    .feed-row > span { overflow: hidden; }
+
+
     /* ── Flight chart (selected spacecraft: surface speed / altitude vs time) ── */
     #flight-chart {
       position: fixed;
       bottom: 12px;
       left: 12px;
-      width: min(42vw, 680px);
-      aspect-ratio: 5 / 3;
-      background: rgba(28, 44, 68, 0.4);
-      border: 1px solid rgba(60, 90, 130, 0.5);
+      width: var(--chart-width);
+      height: var(--bottom-panel-height);
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
       pointer-events: none;
       display: none;
       z-index: 11;
@@ -70,29 +115,36 @@
 
     /* ── Detail panel ── */
     #detail-panel {
-      width: 260px;
-      border: 1px solid rgba(30,48,80,0.8);
-      background: rgba(8,12,20,0.92);
-      backdrop-filter: blur(4px);
-      padding: 16px 20px;
-      display: none;
+      position: fixed;
+      right: 12px;
+      bottom: 12px;
+      width: var(--detail-width);
+      height: var(--bottom-panel-height);
+      border: 1px solid var(--panel-border);
+      background: var(--panel-bg);
+      color: #ffffff;
+      text-shadow: 0 0 4px rgba(0, 0, 0, 0.9); /* keeps the text readable over the globe */
+      padding: 14px 20px;
+      display: none;             /* shown as flex by showDetail() */
+      flex-direction: column;
+      justify-content: space-between;
+      overflow: hidden;
       pointer-events: auto;
     }
 
     #detail-name {
-      font-size: 17px;
-      color: #3ddc84;
+      font-size: 20px;
+      color: #ffffff;
       text-align: center;
-      margin-bottom: 14px;
+      margin-bottom: 4px;
       letter-spacing: 0.1em;
     }
 
     .section-title {
-      font-size: 11px;
-      color: #3ddc84;
+      font-size: 13px;
+      color: #ffffff;
       letter-spacing: 0.08em;
-      margin-top: 14px;
-      margin-bottom: 6px;
+      margin-top: 8px;
     }
 
     .field-row {
@@ -102,8 +154,8 @@
       padding: 2px 0;
     }
 
-    .field-label { font-size: 11px; color: #2a7a50; letter-spacing: 0.04em; }
-    .field-value { font-size: 11px; color: #3ddc84; font-variant-numeric: tabular-nums; margin-left: 8px; }
+    .field-label { font-size: 13px; color: #ffffff; letter-spacing: 0.04em; }
+    .field-value { font-size: 13px; color: #ffffff; font-variant-numeric: tabular-nums; margin-left: 8px; }
 
     /* ── 3D body labels (rendered by CSS2DRenderer) ── */
     .body-label {
@@ -115,24 +167,24 @@
       white-space: nowrap;
       text-align: center;
       /* CSS2DRenderer already centers the wrapper on the point; only lift the label above the marker */
-      transform: translateY(calc(-100% - 14px));
+      transform: translateY(calc(-100% - 6px));
     }
 
-    .body-label.lbl-selected { color: #3ddc84; }
+    .body-label.lbl-selected { color: #3ddc84; font-size: 14px; font-weight: bold; }
 
     /* ── Body position markers (constant screen size) ──
        No transform here: CSS2DRenderer already centers the wrapper (and so this circle) on the point */
     .body-marker {
-      width: 14px;
-      height: 14px;
+      width: 7px;
+      height: 7px;
       border-radius: 50%;
-      border: 1.5px solid rgba(85,136,187,0.75);
+      background: rgba(85,136,187,0.9);
       pointer-events: auto;
       cursor: pointer;
       box-sizing: border-box;
     }
 
-    .body-marker.marker-selected { border-color: #3ddc84; border-width: 2px; }
+    .body-marker.marker-selected { width: 14px; height: 14px; background: #3ddc84; }
   </style>
 </head>
 <body>
@@ -140,6 +192,8 @@
   <div id="canvas-wrap"></div>
 
   <div id="flight-chart"><canvas id="flight-chart-canvas"></canvas></div>
+
+  <div id="data-feed"><div id="data-feed-text"></div></div>
 
   <div id="ui">
     <div class="layout">
@@ -766,12 +820,12 @@
         }
       }
       stepLaunchPitch(dt);
+      stepDataFeed(dt);
       controls.update();
       updateOcclusion();
       renderer.render(scene, camera);
       labelRenderer.render(scene, camera);
     }
-    animate();
 
     // ── UI logic ──────────────────────────────────────────────────────────────
     const detailPanelEl  = document.getElementById("detail-panel");
@@ -785,6 +839,7 @@
     let lastKsdSelectedId;   // selectedId last reported by KSD (undefined until the first poll)
 
     function fmtNum(n, d) { return n == null ? "—" : Number(n).toFixed(d); }
+    function fmtUnit(n, d, unit) { return n == null ? "—" : `${Number(n).toFixed(d)} ${unit}`; }
     function fmtEpoch(ep) {
       if (ep == null) return "—";
       return new Date(ep * 1000).toISOString().replace("T", " ").slice(0, 19);
@@ -792,7 +847,7 @@
 
     function showDetail() {
       if (selectedId === EARTH_MARKER_ID && earthObj) {
-        detailPanelEl.style.display = "block";
+        detailPanelEl.style.display = "flex";
         document.getElementById("detail-name").textContent = "EARTH";
         document.getElementById("d-epoch").textContent = fmtEpoch(earthObj.kep?.ep);
         document.getElementById("d-sma").textContent   = fmtNum(earthObj.kep?.a,    3);
@@ -801,9 +856,9 @@
         document.getElementById("d-raan").textContent  = fmtNum(earthObj.kep?.raan, 2);
         document.getElementById("d-argp").textContent  = fmtNum(earthObj.kep?.argp, 2);
         document.getElementById("d-ma").textContent    = fmtNum(earthObj.kep?.ma,   2);
-        document.getElementById("d-px").textContent    = fmtNum(0, 3);
-        document.getElementById("d-py").textContent    = fmtNum(0, 3);
-        document.getElementById("d-pz").textContent    = fmtNum(0, 3);
+        document.getElementById("d-px").textContent    = fmtUnit(0, 3, "m");
+        document.getElementById("d-py").textContent    = fmtUnit(0, 3, "m");
+        document.getElementById("d-pz").textContent    = fmtUnit(0, 3, "m");
         document.getElementById("d-vx").textContent    = "—";
         document.getElementById("d-vy").textContent    = "—";
         document.getElementById("d-vz").textContent    = "—";
@@ -813,7 +868,7 @@
       const obj = spacecraft.find(o => o.id === selectedId);
       if (!obj) { detailPanelEl.style.display = "none"; return; }
       const ePos = earthObj?.cart?.pos;
-      detailPanelEl.style.display = "block";
+      detailPanelEl.style.display = "flex";
       document.getElementById("detail-name").textContent = obj.name ?? obj.id;
       document.getElementById("d-epoch").textContent = fmtEpoch(obj.kep?.ep);
       document.getElementById("d-sma").textContent   = fmtNum(obj.kep?.a,    3);
@@ -822,12 +877,12 @@
       document.getElementById("d-raan").textContent  = fmtNum(obj.kep?.raan, 2);
       document.getElementById("d-argp").textContent  = fmtNum(obj.kep?.argp, 2);
       document.getElementById("d-ma").textContent    = fmtNum(obj.kep?.ma,   2);
-      document.getElementById("d-px").textContent    = fmtNum(obj.cart?.pos && ePos ? obj.cart.pos.x - ePos.x : null, 3);
-      document.getElementById("d-py").textContent    = fmtNum(obj.cart?.pos && ePos ? obj.cart.pos.y - ePos.y : null, 3);
-      document.getElementById("d-pz").textContent    = fmtNum(obj.cart?.pos && ePos ? obj.cart.pos.z - ePos.z : null, 3);
-      document.getElementById("d-vx").textContent    = fmtNum(obj.cart?.vel?.x, 9);
-      document.getElementById("d-vy").textContent    = fmtNum(obj.cart?.vel?.y, 9);
-      document.getElementById("d-vz").textContent    = fmtNum(obj.cart?.vel?.z, 9);
+      document.getElementById("d-px").textContent    = fmtUnit(obj.cart?.pos && ePos ? obj.cart.pos.x - ePos.x : null, 3, "m");
+      document.getElementById("d-py").textContent    = fmtUnit(obj.cart?.pos && ePos ? obj.cart.pos.y - ePos.y : null, 3, "m");
+      document.getElementById("d-pz").textContent    = fmtUnit(obj.cart?.pos && ePos ? obj.cart.pos.z - ePos.z : null, 3, "m");
+      document.getElementById("d-vx").textContent    = fmtUnit(obj.cart?.vel?.x, 9, "m/s");
+      document.getElementById("d-vy").textContent    = fmtUnit(obj.cart?.vel?.y, 9, "m/s");
+      document.getElementById("d-vz").textContent    = fmtUnit(obj.cart?.vel?.z, 9, "m/s");
     }
 
     function render(data) {
@@ -884,8 +939,8 @@
       { span: 600,  tick: 50,  label: 100 },
       { span: 1000, tick: 100, label: 100 },
     ];
-    const CHART_SPEED_COLOR   = '#eef3fa';
-    const CHART_ALT_COLOR     = '#e08080';
+    const CHART_SPEED_COLOR   = '#7fcf9c'; // slightly desaturated green
+    const CHART_ALT_COLOR     = '#ff9f43'; // orange
     const CHART_AXIS_COLOR    = 'rgba(200, 216, 240, 0.85)';
     const CHART_GRID_COLOR    = 'rgba(200, 216, 240, 0.12)';
     const flightChartEl     = document.getElementById('flight-chart');
@@ -933,7 +988,7 @@
       const ySpeed = kms => pad.top + ph - kms / speedScale.max * ph;
       const yAlt   = km  => pad.top + ph - km / altScale.max * ph;
 
-      ctx.font = `bold ${fontPx}px "Courier New", monospace`;
+      ctx.font = `${fontPx}px "Courier New", monospace`;
       ctx.lineWidth = 1;
 
       // Horizontal grid shared by both y axes (e.g. 600 km → 120, 240, 360, 480, 600)
@@ -971,7 +1026,7 @@
       ctx.stroke();
 
       // Axis titles
-      ctx.font = `bold ${Math.round(fontPx * 1.05)}px "Courier New", monospace`;
+      ctx.font = `${Math.round(fontPx * 1.05)}px "Courier New", monospace`;
       ctx.textBaseline = 'middle';
       ctx.fillStyle = CHART_AXIS_COLOR;
       ctx.fillText('TIME [sec]', pad.left + pw / 2, pad.top + ph + fontPx * 2.3);
@@ -1019,6 +1074,79 @@
       drawFlightChart(lastHistory);
     }
 
+    // ── Data feed (purely decorative) ────────────────────────────────────────
+    // Every object's name and position / velocity, one object per row
+    // ("POS X=  149604878 ..."), scrolling smoothly upward at a steady rate. Each time the rows queued below the panel run low, the latest
+    // response is appended as a block; blocks scrolled out of view are dropped.
+    // Units are m and m/s, as received.
+    const dataFeedEl   = document.getElementById("data-feed");
+    const dataFeedText = document.getElementById("data-feed-text");
+    const DATA_FEED_LINE_HEIGHT   = 16;  // px, same as the CSS row height
+    const DATA_FEED_LINE_INTERVAL = 0.4; // s per row (scroll speed)
+    const DATA_FEED_NAME_WIDTH    = 30;  // half-width columns; full-width characters count as 2
+    let latestFeedObjects = null;
+    let dataFeedOffset = 0;              // px scrolled past the top of the first block
+
+    function showDataFeed(data) {
+      latestFeedObjects = (data.objects ?? []).slice().sort((a, b) => a.id - b.id);
+    }
+
+    // Cut a name to DATA_FEED_NAME_WIDTH half-width columns (full-width characters take 2)
+    function fitName(name) {
+      let width = 0, out = "";
+      for (const ch of name) {
+        const w = /[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6]/.test(ch) ? 2 : 1;
+        if (width + w > DATA_FEED_NAME_WIDTH) break;
+        width += w;
+        out += ch;
+      }
+      return out;
+    }
+
+    function feedRow(cells) {
+      const row = document.createElement("div");
+      row.className = "feed-row";
+      for (const text of cells) {
+        const cell = document.createElement("span");
+        cell.textContent = text;
+        row.appendChild(cell);
+      }
+      return row;
+    }
+
+    function feedBlock(objects) {
+      const block = document.createElement("div");
+      // Value right-aligned in a fixed number of columns after its label (all ASCII, so padding lines up)
+      const field = (label, v, digits, width, unit) =>
+        `${label}=${((v == null || !Number.isFinite(v)) ? "-" : v.toFixed(digits)).padStart(width)} ${unit}`;
+      for (const o of objects) {
+        const p = o.cart?.pos, v = o.cart?.vel;
+        block.appendChild(feedRow([
+          fitName(o.name ?? String(o.id)),
+          field("POS X", p?.x, 0, 15, "m"), field("POS Y", p?.y, 0, 15, "m"), field("POS Z", p?.z, 0, 15, "m"),
+          field("VEL X", v?.x, 3, 11, "m/s"), field("VEL Y", v?.y, 3, 11, "m/s"), field("VEL Z", v?.z, 3, 11, "m/s"),
+        ]));
+      }
+      return block;
+    }
+
+    function stepDataFeed(dt) {
+      if (!latestFeedObjects) return;
+      // Keep at least two panel-heights of rows queued below the visible area
+      for (let i = 0; i < 50 && dataFeedText.offsetHeight - dataFeedOffset < dataFeedEl.clientHeight * 2; i++) {
+        dataFeedText.appendChild(feedBlock(latestFeedObjects));
+      }
+      dataFeedOffset += DATA_FEED_LINE_HEIGHT / DATA_FEED_LINE_INTERVAL * dt;
+      // Drop chunks that have scrolled completely out of view
+      let first = dataFeedText.firstElementChild;
+      while (first && dataFeedText.childElementCount > 1 && first.offsetHeight <= dataFeedOffset) {
+        dataFeedOffset -= first.offsetHeight;
+        first.remove();
+        first = dataFeedText.firstElementChild;
+      }
+      dataFeedText.style.transform = `translateY(${-dataFeedOffset}px)`;
+    }
+
     async function poll() {
       try {
         const historyDone = fetchHistory();
@@ -1026,6 +1154,7 @@
         const res  = await fetch("/api/objects");
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
+        showDataFeed(data);
         await refreshOrbits(data.objects ?? []);
         await trackDone;
         render(data);
@@ -1042,6 +1171,8 @@
       setTimeout(pollLoop, POLL_INTERVAL_MS);
     }
 
+    // Start the render loop only now: it uses state declared throughout the script above
+    animate();
     pollLoop();
   </script>
 </body>
