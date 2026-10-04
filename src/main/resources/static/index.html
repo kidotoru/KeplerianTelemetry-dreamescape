@@ -744,6 +744,8 @@
     //     by the rocket's displacement.
     //  3. Above LAUNCH_PITCH_ALT_KM, lower the pitch from 90° to LAUNCH_SIDE_PITCH
     //     so the trajectory is seen obliquely from the side.
+    //  4. On orbit insertion, pull back (same viewing direction) to LAUNCH_ORBIT_DIST
+    //     so the whole orbit comes into view.
     // All moves are gradual. The viewer may still drag / zoom meanwhile; the
     // automatic moves carry on regardless, easing the camera back onto its path
     // rather than snapping it there.
@@ -754,6 +756,8 @@
     const LAUNCH_SIDE_PITCH    = THREE.MathUtils.degToRad(30); // pitch after pitching down
     const LAUNCH_PITCH_RATE    = THREE.MathUtils.degToRad(20); // per second → 3 s from 90° to 30°
     const LAUNCH_CAM_SMOOTHING = 3.0; // 1/s: how quickly the camera eases onto its pitch-down path
+    const LAUNCH_ORBIT_DIST    = 50.0; // camera distance after orbit insertion (50,000 km)
+    const LAUNCH_PULL_RATE     = 0.8;  // 1/s: how quickly it pulls back (roughly 4 s to get there)
     let cameraGoal = null;
     // { id, last: rocket position, up: local vertical, side: horizontal direction the camera
     //   swings toward when pitching down, pitch: current pitch (rad), pitching: lowering the pitch now }
@@ -806,7 +810,7 @@
     }
 
     // Called after every telemetry update: follow the rocket and start pitching down above the threshold
-    function updateLaunchCamera() {
+    function updateLaunchCamera(inOrbit) {
       if (!launchCam) return;
       if (selectedId !== launchCam.id) { launchCam = null; return; }
       const st = craftState3(launchCam.id);
@@ -821,6 +825,24 @@
       const altKm = (st.pos.length() / SCALE - earthRadius) / 1000;
       if (!launchCam.pitching && altKm >= LAUNCH_PITCH_ALT_KM) {
         launchCam.pitching = true;
+      }
+      if (!launchCam.pulling && inOrbit === true) {
+        launchCam.pulling = true;
+        launchCam.settled = true; // the pitch-down (if still going) stops here; the pull-back takes over
+        cameraGoal = null;
+      }
+    }
+
+    // Called every frame after orbit insertion: back the camera away from the rocket,
+    // keeping its viewing direction, until it is LAUNCH_ORBIT_DIST away
+    function stepOrbitPull(dt) {
+      if (!launchCam?.pulling || launchCam.pulled) return;
+      const offset = camera.position.clone().sub(controls.target);
+      const dist = offset.length();
+      const next = THREE.MathUtils.lerp(dist, LAUNCH_ORBIT_DIST, 1 - Math.exp(-LAUNCH_PULL_RATE * dt));
+      camera.position.copy(controls.target).addScaledVector(offset.normalize(), next);
+      if (Math.abs(LAUNCH_ORBIT_DIST - next) < 1e-3) {
+        launchCam.pulled = true; // done; from here on only the follow translation applies
       }
     }
 
@@ -884,6 +906,7 @@
         }
       }
       stepLaunchPitch(dt);
+      stepOrbitPull(dt);
       stepDataFeed(dt);
       controls.update();
       updateOcclusion();
@@ -981,7 +1004,7 @@
 
       showDetail();
       updateScene();
-      updateLaunchCamera();
+      updateLaunchCamera(data.selectedInOrbit);
       updateMissionPanel(data);
       drawGroundTrack();
     }
