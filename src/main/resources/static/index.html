@@ -747,7 +747,9 @@
     //     direction of the inertial velocity — so a near-polar launch is seen from the
     //     east / west rather than from along its track.
     //  4. On orbit insertion, pull back to LAUNCH_ORBIT_DIST while lowering the pitch
-    //     to 0° (looking along the flight plane's normal), so the orbit is seen face-on.
+    //     to 0° (looking along the flight plane's normal) and moving the target from
+    //     the rocket to the Earth's centre, so the whole orbit is seen face-on, centred.
+    //     From then on the camera stays put and the rocket travels around the orbit.
     // All moves are gradual. The viewer may still drag / zoom meanwhile; the
     // automatic moves carry on regardless, easing the camera back onto its path
     // rather than snapping it there.
@@ -817,11 +819,14 @@
       if (selectedId !== launchCam.id) { launchCam = null; return; }
       const st = craftState3(launchCam.id);
       if (!st) return;
-      const delta = st.pos.clone().sub(launchCam.last);
-      camera.position.add(delta);
-      controls.target.add(delta);
-      if (targetGoal) targetGoal.add(delta);
-      if (cameraGoal) cameraGoal.add(delta);
+      // Follow the rocket until orbit insertion; after that the target heads for the Earth's centre
+      if (!launchCam.pulling) {
+        const delta = st.pos.clone().sub(launchCam.last);
+        camera.position.add(delta);
+        controls.target.add(delta);
+        if (targetGoal) targetGoal.add(delta);
+        if (cameraGoal) cameraGoal.add(delta);
+      }
       launchCam.last = st.pos.clone();
 
       const altKm = (st.pos.length() / SCALE - earthRadius) / 1000;
@@ -840,8 +845,10 @@
       if (!launchCam.pulling && inOrbit === true) {
         launchCam.pulling = true;
         launchCam.pullDist = camera.position.distanceTo(controls.target);
+        launchCam.focus = 0;      // 0 = target on the rocket, 1 = on the Earth's centre
         launchCam.settled = true; // the pitch-down (if still going) stops here; the pull-back takes over
         cameraGoal = null;
+        targetGoal = null;
       }
     }
 
@@ -851,14 +858,19 @@
       if (!launchCam?.pulling || launchCam.pulled) return;
       // Pitch down to 0° at the same rate as the launch pitch-down, and ease the distance out
       launchCam.pitch = Math.max(0, launchCam.pitch - LAUNCH_PITCH_RATE * dt);
-      // The distance eases on its own (not from the camera's actual, lagging distance)
-      launchCam.pullDist = THREE.MathUtils.lerp(launchCam.pullDist, LAUNCH_ORBIT_DIST, 1 - Math.exp(-LAUNCH_PULL_RATE * dt));
+      // The distance and the target's move to the Earth's centre ease on their own
+      // (not from the camera's actual, lagging state)
+      const k = 1 - Math.exp(-LAUNCH_PULL_RATE * dt);
+      launchCam.pullDist = THREE.MathUtils.lerp(launchCam.pullDist, LAUNCH_ORBIT_DIST, k);
+      launchCam.focus = THREE.MathUtils.lerp(launchCam.focus, 1, k);
+      controls.target.copy(launchCam.last).multiplyScalar(1 - launchCam.focus); // the Earth's centre is the origin
       const dir = launchCam.side.clone().multiplyScalar(Math.cos(launchCam.pitch)).addScaledVector(launchCam.up, Math.sin(launchCam.pitch));
       const goal = controls.target.clone().addScaledVector(dir, launchCam.pullDist);
       // Ease onto the path rather than jumping, in case the viewer has moved the camera
       camera.position.lerp(goal, 1 - Math.exp(-LAUNCH_CAM_SMOOTHING * dt));
-      if (launchCam.pitch <= 0 && Math.abs(LAUNCH_ORBIT_DIST - launchCam.pullDist) < 1e-3 && camera.position.distanceTo(goal) < 1e-3) {
-        launchCam.pulled = true; // done; from here on only the follow translation applies
+      if (launchCam.pitch <= 0 && Math.abs(LAUNCH_ORBIT_DIST - launchCam.pullDist) < 1e-3 && launchCam.focus > 1 - 1e-4 && camera.position.distanceTo(goal) < 1e-3) {
+        controls.target.set(0, 0, 0);
+        launchCam.pulled = true; // done; the camera stays put around the Earth from here on
       }
     }
 
