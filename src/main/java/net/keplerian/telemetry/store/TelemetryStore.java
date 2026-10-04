@@ -1,6 +1,7 @@
 package net.keplerian.telemetry.store;
 
 import net.keplerian.telemetry.model.OrbitLeg;
+import net.keplerian.telemetry.model.SelectedState;
 import net.keplerian.telemetry.model.Orientation;
 import net.keplerian.telemetry.model.SpaceObject;
 import net.keplerian.telemetry.model.SpaceObjectInfo;
@@ -18,8 +19,8 @@ public class TelemetryStore {
 
     private final Map<Long, SpaceObject> objects = new ConcurrentHashMap<>();
     private volatile Long currentTime = null;
-    /** KSD で選択中の ID と、その宇宙機が周回軌道上か。別々に読むと食い違いうるので1つにまとめて差し替える */
-    public record Selection(Long id, Boolean inOrbit) {}
+    /** KSD で選択中の ID と、その宇宙機の状態（宇宙機以外なら null）。別々に読むと食い違いうるので1つにまとめて差し替える */
+    public record Selection(Long id, SelectedState state) {}
     private volatile Selection selection = new Selection(null, null);
 
     public void setCurrentTime(long currentTime) {
@@ -30,8 +31,8 @@ public class TelemetryStore {
         return currentTime;
     }
 
-    public void setSelection(Long selectedId, Boolean inOrbit) {
-        this.selection = new Selection(selectedId, inOrbit);
+    public void setSelection(Long selectedId, SelectedState state) {
+        this.selection = new Selection(selectedId, state);
     }
 
     public Selection getSelection() {

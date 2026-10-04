@@ -66,6 +66,56 @@
 
     #data-feed-text { will-change: transform; }
 
+    /* ── Top panels: mission clock + event log (left), ground track map (right) ── */
+    #mission-panel, #ground-track {
+      position: fixed;
+      top: var(--panel-gap);
+      width: var(--chart-width);
+      height: calc(var(--chart-width) / 2);
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      z-index: 11;
+      pointer-events: none;
+      font-family: "Courier New", monospace;
+      color: #ffffff;
+      text-shadow: 0 0 4px rgba(0, 0, 0, 0.9);
+    }
+    #mission-panel {
+      left: var(--panel-gap);
+      padding: 12px 18px;
+      display: none;               /* shown while KSD has a spacecraft selected */
+      flex-direction: column;
+    }
+    #ground-track { right: var(--panel-gap); }
+    #ground-track canvas { width: 100%; height: 100%; display: block; }
+
+    .mission-caption { font-size: 12px; letter-spacing: 0.12em; color: rgba(255, 255, 255, 0.6); }
+    #met { font-size: 44px; letter-spacing: 0.06em; margin: 2px 0 8px; font-variant-numeric: tabular-nums; }
+    #event-log {
+      flex: 1;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start; /* filled from the top, one row per event */
+      border-top: 1px solid var(--panel-border);
+      padding-top: 6px;
+    }
+    .event-row {
+      display: grid;
+      grid-template-columns: 12ch 20ch 16ch 16ch; /* time | event | "ALT  12345.6 km" | "VEL 12.34 km/s" */
+      column-gap: 1ch;
+      font-size: 13px;
+      line-height: 20px;
+      white-space: pre;
+    }
+    .event-row .ev-name { color: #7fcf9c; }
+    .event-row .ev-num { color: rgba(255, 255, 255, 0.8); }
+    .event-row.ev-new { animation: ev-flash 2.5s ease-out; }
+    @keyframes ev-flash {
+      from { background: rgba(127, 207, 156, 0.45); }
+      to   { background: transparent; }
+    }
+
     /* One row per object. Fixed column widths keep the columns aligned on every row
        (full-width characters in names don't render exactly 2 half-width columns wide,
        so padding with spaces alone wouldn't line up). */
@@ -194,6 +244,15 @@
   <div id="flight-chart"><canvas id="flight-chart-canvas"></canvas></div>
 
   <div id="data-feed"><div id="data-feed-text"></div></div>
+
+  <div id="mission-panel">
+    <div class="mission-caption" id="mission-caption">MISSION ELAPSED TIME</div>
+    <div id="met">T+ 00:00:00</div>
+    <div class="mission-caption">FLIGHT EVENTS</div>
+    <div id="event-log"></div>
+  </div>
+
+  <div id="ground-track"><canvas id="ground-track-canvas"></canvas></div>
 
   <div id="ui">
     <div class="layout">
@@ -918,6 +977,8 @@
       showDetail();
       updateScene();
       updateLaunchCamera();
+      updateMissionPanel(data);
+      drawGroundTrack();
     }
 
     // ── Flight chart ──────────────────────────────────────────────────────────
@@ -1146,6 +1207,222 @@
       }
       dataFeedText.style.transform = `translateY(${-dataFeedOffset}px)`;
     }
+
+    // ── Mission clock + flight event log (top left) ───────────────────────────
+    // For the spacecraft selected in KSD: T- countdown before launch, T+ after it,
+    // and KSD's flight log, added one row at a time from the top (newest at the bottom).
+    const missionPanelEl   = document.getElementById("mission-panel");
+    const missionCaptionEl = document.getElementById("mission-caption");
+    const metEl            = document.getElementById("met");
+    const eventLogEl       = document.getElementById("event-log");
+    const EVENT_LABELS = {
+      LiftOff: "LIFTOFF", MaxQ: "MAX-Q", BoosterJettison: "BOOSTER SEP", StageSeparation: "STAGE SEP",
+      FairingDeployment: "FAIRING SEP", EngineIgnition: "ENGINE IGNITION", EngineCutoff: "ENGINE CUTOFF",
+      OrbitInsertion: "ORBIT INSERTION",
+    };
+    let shownEvents = { id: null, count: 0 };
+
+    function fmtMet(sec) {
+      const sign = sec < 0 ? "-" : "+";
+      let t = Math.floor(Math.abs(sec));
+      const h = Math.floor(t / 3600); t -= h * 3600;
+      const m = Math.floor(t / 60);
+      const ss = t - m * 60;
+      return `T${sign} ${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+    }
+
+    function updateMissionPanel(data) {
+      const id = data.selectedId;
+      if (id == null || data.selectedLaunchTime == null || data.currentTime == null) {
+        missionPanelEl.style.display = "none";
+        return;
+      }
+      missionPanelEl.style.display = "flex";
+      const name = objectsById[id]?.name ?? String(id);
+      missionCaptionEl.textContent = `MISSION ELAPSED TIME — ${name}`;
+      metEl.textContent = fmtMet(data.currentTime - data.selectedLaunchTime);
+
+      const log = data.selectedFlightLog ?? [];
+      if (shownEvents.id !== id || shownEvents.count !== log.length) {
+        const firstNew = shownEvents.id === id ? shownEvents.count : log.length; // don't flash a whole log on selection
+        eventLogEl.replaceChildren(...log.map((e, i) => {
+          const row = document.createElement("div");
+          row.className = i >= firstNew ? "event-row ev-new" : "event-row";
+          const cell = (text, cls) => { const c = document.createElement("span"); c.textContent = text; if (cls) c.className = cls; return c; };
+          row.append(
+            cell(fmtMet(e.time ?? 0)),
+            cell(EVENT_LABELS[e.event] ?? String(e.event).toUpperCase(), "ev-name"),
+            // Fixed-width fields so the labels and units line up on every row
+            cell(e.altitude == null ? "" : `ALT ${(e.altitude / 1000).toFixed(1).padStart(7)} km`, "ev-num"),
+            cell(e.velocity == null ? "" : `VEL ${(e.velocity / 1000).toFixed(2).padStart(5)} km/s`, "ev-num"),
+          );
+          return row;
+        }));
+        shownEvents = { id, count: log.length };
+        // Once the rows overflow, keep the newest in view (the oldest go off the top)
+        eventLogEl.scrollTop = eventLogEl.scrollHeight;
+      }
+    }
+
+    // ── Ground track map (top right) ─────────────────────────────────────────
+    // Equirectangular world map (the globe's texture) with the night side shaded,
+    // ground sites, other spacecraft, and the selected spacecraft's past ground
+    // track plus a predicted one: its current position / velocity propagated as a
+    // two-body orbit (RK4) for one revolution (or until it meets the ground), with
+    // the Earth turning underneath.
+    const groundTrackCanvas = document.getElementById("ground-track-canvas");
+    const GM_EARTH_TRACK = 3.986004418e14;                 // m^3/s^2
+    const EARTH_SPIN = 2 * Math.PI / 86164.0905;           // rad/s (sidereal day)
+    const TRACK_PREDICT_STEPS = 360;
+    const TRACK_HISTORY_MAX = 5000;
+    let groundTrackHistory = { id: null, points: [] };     // past sub-satellite points of the selected spacecraft
+
+    const dot3 = (a, b) => a.x * b.x + a.y * b.y + a.z * b.z;
+
+    // Earth-relative vector (same axes as pos) → [lat, lon] in degrees, using Earth's
+    // orientation rotated by `spin` radians (the Earth's turn after `spin / EARTH_SPIN` s)
+    function latLonOf(rel, o, spin = 0) {
+      const c = Math.cos(spin), sn = Math.sin(spin);
+      const px = dot3(rel, o.primeMeridian), py = dot3(rel, o.east), pz = dot3(rel, o.north);
+      // the body's prime meridian turns toward east: prime(t) = prime·cos + east·sin, east(t) = east·cos − prime·sin
+      const x = px * c + py * sn, y = py * c - px * sn;
+      return [Math.atan2(pz, Math.hypot(x, y)) * 180 / Math.PI, Math.atan2(y, x) * 180 / Math.PI];
+    }
+
+    function relToEarth(obj) {
+      const p = obj?.cart?.pos, e = earthObj?.cart?.pos;
+      return p && e ? { x: p.x - e.x, y: p.y - e.y, z: p.z - e.z } : null;
+    }
+
+    // Future sub-satellite points from the current state (two-body, RK4)
+    function predictGroundTrack(r0, v0, o) {
+      const r = Math.hypot(r0.x, r0.y, r0.z), v2 = dot3(v0, v0);
+      const energy = v2 / 2 - GM_EARTH_TRACK / r;
+      const a = -GM_EARTH_TRACK / (2 * energy);
+      const duration = energy < 0 ? Math.min(2 * Math.PI * Math.sqrt(a * a * a / GM_EARTH_TRACK), 6 * 3600) : 2 * 3600;
+      const dt = duration / TRACK_PREDICT_STEPS;
+      const acc = (p) => { const d = Math.hypot(p.x, p.y, p.z); const k = -GM_EARTH_TRACK / (d * d * d); return { x: p.x * k, y: p.y * k, z: p.z * k }; };
+      const add = (p, q, f) => ({ x: p.x + q.x * f, y: p.y + q.y * f, z: p.z + q.z * f });
+      let p = { ...r0 }, v = { ...v0 };
+      const out = [];
+      for (let i = 1; i <= TRACK_PREDICT_STEPS; i++) {
+        const k1v = acc(p),                      k1p = v;
+        const k2v = acc(add(p, k1p, dt / 2)),    k2p = add(v, k1v, dt / 2);
+        const k3v = acc(add(p, k2p, dt / 2)),    k3p = add(v, k2v, dt / 2);
+        const k4v = acc(add(p, k3p, dt)),        k4p = add(v, k3v, dt);
+        p = { x: p.x + dt / 6 * (k1p.x + 2 * k2p.x + 2 * k3p.x + k4p.x), y: p.y + dt / 6 * (k1p.y + 2 * k2p.y + 2 * k3p.y + k4p.y), z: p.z + dt / 6 * (k1p.z + 2 * k2p.z + 2 * k3p.z + k4p.z) };
+        v = { x: v.x + dt / 6 * (k1v.x + 2 * k2v.x + 2 * k3v.x + k4v.x), y: v.y + dt / 6 * (k1v.y + 2 * k2v.y + 2 * k3v.y + k4v.y), z: v.z + dt / 6 * (k1v.z + 2 * k2v.z + 2 * k3v.z + k4v.z) };
+        if (Math.hypot(p.x, p.y, p.z) < earthRadius) break; // came down
+        out.push(latLonOf(p, o, EARTH_SPIN * dt * i));
+      }
+      return out;
+    }
+
+    function drawGroundTrack() {
+      const o = earthObj?.orientation;
+      const dpr = window.devicePixelRatio || 1;
+      const w = groundTrackCanvas.clientWidth, h = groundTrackCanvas.clientHeight;
+      if (groundTrackCanvas.width !== Math.round(w * dpr) || groundTrackCanvas.height !== Math.round(h * dpr)) {
+        groundTrackCanvas.width = Math.round(w * dpr);
+        groundTrackCanvas.height = Math.round(h * dpr);
+      }
+      const ctx = groundTrackCanvas.getContext("2d");
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+      const X = lon => (lon + 180) / 360 * w;
+      const Y = lat => (90 - lat) / 180 * h;
+
+      // Map
+      const img = earthTexture.image;
+      if (img && img.complete && img.naturalWidth) {
+        ctx.globalAlpha = 0.55;
+        ctx.drawImage(img, 0, 0, w, h);
+        ctx.globalAlpha = 1;
+      }
+      if (!o) return;
+
+      // Night side
+      const sunRel = relToEarth(sunObj);
+      if (sunRel) {
+        const [sLat, sLon] = latLonOf(sunRel, o);
+        const d2r = Math.PI / 180, cs = Math.cos(sLat * d2r), ss = Math.sin(sLat * d2r);
+        ctx.fillStyle = "rgba(0, 0, 20, 0.45)";
+        for (let lat = -88; lat < 90; lat += 4) {
+          for (let lon = -178; lon < 180; lon += 4) {
+            const cz = Math.cos(lat * d2r) * cs * Math.cos((lon - sLon) * d2r) + Math.sin(lat * d2r) * ss;
+            if (cz < 0) ctx.fillRect(X(lon - 2), Y(lat + 2), w / 90 + 0.5, h / 45 + 0.5);
+          }
+        }
+      }
+
+      // Graticule
+      ctx.strokeStyle = "rgba(200, 216, 240, 0.15)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let lon = -150; lon < 180; lon += 30) { ctx.moveTo(X(lon), 0); ctx.lineTo(X(lon), h); }
+      for (let lat = -60; lat <= 60; lat += 30) { ctx.moveTo(0, Y(lat)); ctx.lineTo(w, Y(lat)); }
+      ctx.stroke();
+
+      // Polyline that breaks where it wraps around the ±180° edge
+      const polyline = (pts) => {
+        ctx.beginPath();
+        pts.forEach(([lat, lon], i) => {
+          const x = X(lon), y = Y(lat);
+          if (i === 0 || Math.abs(lon - pts[i - 1][1]) > 180) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+      };
+
+      // Ground sites and other spacecraft
+      for (const obj of Object.values(objectsById)) {
+        if (obj.parentId !== EARTH_ID || obj.id === selectedId) continue;
+        const rel = relToEarth(obj);
+        if (!rel) continue;
+        const [lat, lon] = latLonOf(rel, o);
+        if (HIDDEN_TYPES.has((obj.type ?? "").trim().toLowerCase())) {
+          ctx.fillStyle = "rgba(255, 210, 120, 0.85)";
+          ctx.fillRect(X(lon) - 2, Y(lat) - 2, 4, 4);
+        } else {
+          ctx.fillStyle = "rgba(85, 136, 187, 0.9)";
+          ctx.beginPath(); ctx.arc(X(lon), Y(lat), 2, 0, 2 * Math.PI); ctx.fill();
+        }
+      }
+
+      // Selected spacecraft
+      const sel = spacecraft.find(c => c.id === selectedId);
+      const rel = relToEarth(sel);
+      if (!sel || !rel) { groundTrackHistory = { id: null, points: [] }; return; }
+      const now = latLonOf(rel, o);
+      if (groundTrackHistory.id !== sel.id) groundTrackHistory = { id: sel.id, points: [] };
+      groundTrackHistory.points.push(now);
+      if (groundTrackHistory.points.length > TRACK_HISTORY_MAX) groundTrackHistory.points.shift();
+
+      if (sel.cart?.vel) {
+        ctx.strokeStyle = "rgba(127, 207, 156, 0.9)";
+        ctx.setLineDash([6, 4]);
+        polyline([now, ...predictGroundTrack(rel, sel.cart.vel, o)]);
+        ctx.setLineDash([]);
+      }
+      ctx.strokeStyle = "rgba(255, 192, 77, 0.95)";
+      ctx.lineWidth = 2;
+      polyline(groundTrackHistory.points);
+
+      ctx.fillStyle = "#3ddc84";
+      ctx.beginPath(); ctx.arc(X(now[1]), Y(now[0]), 5, 0, 2 * Math.PI); ctx.fill();
+
+      // Read-out
+      const alt = (Math.hypot(rel.x, rel.y, rel.z) - earthRadius) / 1000;
+      const fmtLat = v => `${Math.abs(v).toFixed(2)}°${v >= 0 ? "N" : "S"}`;
+      const fmtLon = v => `${Math.abs(v).toFixed(2)}°${v >= 0 ? "E" : "W"}`;
+      ctx.font = `13px "Courier New", monospace`;
+      ctx.fillStyle = "#ffffff";
+      ctx.shadowColor = "rgba(0, 0, 0, 0.9)"; ctx.shadowBlur = 4;
+      ctx.fillText("GROUND TRACK", 10, 18);
+      ctx.fillText(`${sel.name ?? sel.id}  LAT ${fmtLat(now[0])}  LON ${fmtLon(now[1])}  ALT ${alt.toFixed(1)} km`, 10, h - 10);
+      ctx.shadowBlur = 0;
+    }
+
+    window.addEventListener('resize', () => drawGroundTrack());
 
     async function poll() {
       try {

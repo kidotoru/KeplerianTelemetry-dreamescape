@@ -95,6 +95,8 @@ target\dist\KeplerianTelemetry\start.bat
 地球を中心に固定した表示で、地球を周回する宇宙機・月だけを描く。
 
 - 選択したオブジェクトの詳細は画面右下（左下のグラフと同じ高さ）。選択中の機体はマーカーを塗りつぶし、ラベルを大きく表示
+- 左上: KSD で選択中の宇宙機のミッション経過時間（打ち上げ前は `T-` のカウントダウン、打ち上げ後は `T+`）と、KSD のフライトログ（リフトオフ・Max-Q・段分離・軌道投入など。新しいイベントは一瞬強調）
+- 右上: 地上軌跡の世界地図。夜側の陰、射場などの地上施設、他の宇宙機、選択中の機体の通過済みの軌跡と予測軌跡（現在の位置・速度から二体問題で 1 周回ぶん数値積分し、地球の自転を考慮）
 - 選択したオブジェクトの直交座標要素（地球相対）・ケプラー要素の表示
 - 実際の太陽の方向から照らした地球
 - KSD 本体と同じ軌道線の描画（`orbitRev` が変わったオブジェクトだけ `?orbits=true` で取り直す）
@@ -228,7 +230,10 @@ KSD は軌道線（`orbitRev` / `orbitLegs`）を、**接続後の最初の `Tel
   "messageType": "Telemetry",
   "currentTime": 1609459200,
   "selectedId": 3,
-  "selectedState": { "surfaceSpeed": 7650.2, "altitude": 412000.5, "inOrbit": true },
+  "selectedState": {
+    "surfaceSpeed": 7650.2, "altitude": 412000.5, "inOrbit": true, "launchTime": 1793761426.0,
+    "flightLog": [ { "event": "LiftOff", "time": 0.0, "altitude": 21.4, "velocity": 404.1 } ]
+  },
   "spaceObjects": [
     {
       "id": 3,
@@ -268,6 +273,8 @@ KSD は軌道線（`orbitRev` / `orbitLegs`）を、**接続後の最初の `Tel
 | `selectedState.surfaceSpeed` | number | 対地速度（m/s）。親天体の自転と共回転する座標系での速さで、地上では 0 |
 | `selectedState.altitude` | number | 親天体の基準半径からの高度（メートル） |
 | `selectedState.inOrbit` | boolean | 周回軌道上か（近点高度がカーマンラインより上） |
+| `selectedState.launchTime` | number | 打ち上げ時刻 T0（Unix 秒）。`currentTime` より後なら打ち上げ前 |
+| `selectedState.flightLog` | FlightLogEntry[] | KSD のフライトログ（古い順） |
 | `spaceObjects[].id` | number | オブジェクト ID |
 | `spaceObjects[].cart.pos` | Vector3 | 位置（メートル） |
 | `spaceObjects[].cart.vel` | Vector3 | 親天体に対する相対速度（m/s）。座標軸は `pos` と同じ |
@@ -317,6 +324,8 @@ GET /api/objects?orbits=true
   "currentTime": 1609459200,
   "selectedId": 3,
   "selectedInOrbit": null,
+  "selectedLaunchTime": null,
+  "selectedFlightLog": null,
   "objects": [
     {
       "id": 1,
@@ -508,6 +517,17 @@ GET /api/objects/3?orbits=true
 | `currentTime` | Long | 現在のシミュレーション時刻（Unix 秒） |
 | `selectedId` | Long \| null | KSD で選択中のオブジェクト ID。未選択なら `null` |
 | `selectedInOrbit` | Boolean \| null | 選択中の宇宙機が周回軌道上か（`selectedId` と同じ時点の値）。宇宙機以外の選択・未選択なら `null` |
+| `selectedLaunchTime` | Double \| null | 選択中の宇宙機の打ち上げ時刻（Unix 秒）。同上 |
+| `selectedFlightLog` | FlightLogEntry[] \| null | 選択中の宇宙機のフライトログ（古い順）。同上 |
+
+### FlightLogEntry
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `event` | string | 種類: `LiftOff` `MaxQ` `BoosterJettison` `StageSeparation` `FairingDeployment` `EngineIgnition` `EngineCutoff` `OrbitInsertion`（KSD 側で増えることがある） |
+| `time` | number | 打ち上げからの経過時間（秒） |
+| `altitude` | number | 高度（メートル） |
+| `velocity` | number | 速度（m/s） |
 | `objects` | SpaceObject[] | 全オブジェクトの配列 |
 
 ### SpaceObject

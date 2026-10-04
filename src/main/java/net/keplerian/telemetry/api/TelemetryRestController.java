@@ -1,6 +1,7 @@
 package net.keplerian.telemetry.api;
 
 import net.keplerian.telemetry.model.SelectedHistoryResponse;
+import net.keplerian.telemetry.model.SelectedState;
 import net.keplerian.telemetry.model.SelectedTrackResponse;
 import net.keplerian.telemetry.model.SpaceObject;
 import net.keplerian.telemetry.model.TelemetryResponse;
@@ -40,7 +41,12 @@ public class TelemetryRestController {
             objects = objects.stream().map(SpaceObject::withoutOrbitLegs).toList();
         }
         TelemetryStore.Selection selection = store.getSelection();
-        return new TelemetryResponse(store.getCurrentTime(), selection.id(), selection.inOrbit(), objects);
+        SelectedState state = selection.state();
+        return new TelemetryResponse(store.getCurrentTime(), selection.id(),
+                state != null ? state.inOrbit() : null,
+                state != null ? state.launchTime() : null,
+                state != null ? state.flightLog() : null,
+                objects);
     }
 
     /**
