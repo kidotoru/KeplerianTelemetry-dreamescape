@@ -491,6 +491,55 @@
           });
         }
       });
+
+      drawPastTrack(ePos);
+    }
+
+    // ── Past track of the spacecraft selected in KSD ─────────────────────────
+    // Only before orbit insertion (launch / ballistic flight), like KSD's own
+    // actual-trajectory line. The server records each point in its parent body's
+    // fixed frame (components along primeMeridian / east / north), so drawing it
+    // with the body's *current* orientation keeps it glued to the ground (launch
+    // pad included) while the Earth rotates.
+    const TRACK_COLOR = 0xffc04d;
+    let lastTrack = null;
+
+    function drawPastTrack(ePos) {
+      const samples = lastTrack?.samples ?? [];
+      if (!ePos || samples.length < 2) return;
+      const material = new THREE.LineBasicMaterial({ color: TRACK_COLOR, transparent: true, opacity: 0.95 });
+
+      // One polyline per run of samples with the same parent body
+      let run = [];
+      const flush = () => {
+        if (run.length >= 2) {
+          orbitGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(run), material));
+        }
+        run = [];
+      };
+      let runParentId = null;
+      samples.forEach(p => {
+        if (p.parentId !== runParentId) { flush(); runParentId = p.parentId; }
+        const parent = objectsById[p.parentId];
+        const pp = parent?.cart?.pos, o = parent?.orientation;
+        if (!pp || !o?.primeMeridian || !o?.east || !o?.north) return;
+        const f = p.fixed;
+        // Body-fixed components → world (same axes as pos) with the body's current orientation
+        const x = pp.x - ePos.x + f.x * o.primeMeridian.x + f.y * o.east.x + f.z * o.north.x;
+        const y = pp.y - ePos.y + f.x * o.primeMeridian.y + f.y * o.east.y + f.z * o.north.y;
+        const z = pp.z - ePos.z + f.x * o.primeMeridian.z + f.y * o.east.z + f.z * o.north.z;
+        run.push(toThree(x, y, z));
+      });
+      flush();
+    }
+
+    async function fetchTrack() {
+      try {
+        const res = await fetch("/api/track");
+        if (res.ok) lastTrack = await res.json();
+      } catch (e) {
+        console.warn(`[track] ${e.message}`);
+      }
     }
 
     // ── Raycasting: click on body sphere ──────────────────────────────────────
@@ -595,6 +644,7 @@
     let sunObj     = null;   // the Sun SpaceObject, used only to aim sunLight
     let spacecraft = [];     // objects whose parentId === earthObj.id
     let selectedId = null;   // number (spacecraft id) or EARTH_MARKER_ID
+    let lastKsdSelectedId;   // selectedId last reported by KSD (undefined until the first poll)
 
     function fmtNum(n, d) { return n == null ? "—" : Number(n).toFixed(d); }
     function fmtEpoch(ep) {
@@ -650,6 +700,18 @@
       spacecraft = earthObj
         ? objects.filter(o => o.parentId === earthObj.id && !HIDDEN_TYPES.has((o.type ?? "").trim().toLowerCase()))
         : [];
+
+      // Follow the selection made in KSD whenever it changes. Between changes the
+      // viewer may click another object; that choice stays until KSD selects again.
+      if (data.selectedId !== lastKsdSelectedId) {
+        lastKsdSelectedId = data.selectedId;
+        const followId = data.selectedId === EARTH_ID ? EARTH_MARKER_ID
+          : spacecraft.some(o => o.id === data.selectedId) ? data.selectedId : null;
+        if (followId != null) {
+          selectedId = followId;
+          focusOn(followId);
+        }
+      }
 
       if (earthObj && selectedId == null) selectedId = EARTH_MARKER_ID;
       if (selectedId !== EARTH_MARKER_ID && !spacecraft.some(o => o.id === selectedId)) {
@@ -817,10 +879,12 @@
     async function poll() {
       try {
         const historyDone = fetchHistory();
+        const trackDone   = fetchTrack();
         const res  = await fetch("/api/objects");
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         await refreshOrbits(data.objects ?? []);
+        await trackDone;
         render(data);
         await historyDone;
       } catch (e) {

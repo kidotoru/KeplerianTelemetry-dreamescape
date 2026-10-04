@@ -1,9 +1,11 @@
 package net.keplerian.telemetry.api;
 
 import net.keplerian.telemetry.model.SelectedHistoryResponse;
+import net.keplerian.telemetry.model.SelectedTrackResponse;
 import net.keplerian.telemetry.model.SpaceObject;
 import net.keplerian.telemetry.model.TelemetryResponse;
 import net.keplerian.telemetry.store.SelectedHistory;
+import net.keplerian.telemetry.store.SelectedTrack;
 import net.keplerian.telemetry.store.TelemetryStore;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -20,10 +22,12 @@ public class TelemetryRestController {
 
     private final TelemetryStore store;
     private final SelectedHistory selectedHistory;
+    private final SelectedTrack selectedTrack;
 
-    public TelemetryRestController(TelemetryStore store, SelectedHistory selectedHistory) {
+    public TelemetryRestController(TelemetryStore store, SelectedHistory selectedHistory, SelectedTrack selectedTrack) {
         this.store = store;
         this.selectedHistory = selectedHistory;
+        this.selectedTrack = selectedTrack;
     }
 
     /**
@@ -47,6 +51,14 @@ public class TelemetryRestController {
     @GetMapping("/history")
     public SelectedHistoryResponse getHistory() {
         return selectedHistory.snapshot();
+    }
+
+    /**
+     * KSD で選択中の宇宙機の過去の軌跡（軌道投入前のみ、親天体固定座標）
+     */
+    @GetMapping("/track")
+    public SelectedTrackResponse getTrack() {
+        return selectedTrack.snapshot();
     }
 
     @GetMapping("/objects/{id}")

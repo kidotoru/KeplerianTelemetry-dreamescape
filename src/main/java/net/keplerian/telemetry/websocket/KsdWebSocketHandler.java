@@ -6,6 +6,7 @@ import net.keplerian.telemetry.model.ObjectInfoMessage;
 import net.keplerian.telemetry.model.SpaceObjectInput;
 import net.keplerian.telemetry.model.TelemetryMessage;
 import net.keplerian.telemetry.store.SelectedHistory;
+import net.keplerian.telemetry.store.SelectedTrack;
 import net.keplerian.telemetry.store.TelemetryStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,12 +37,14 @@ public class KsdWebSocketHandler extends TextWebSocketHandler {
     private final ObjectMapper objectMapper;
     private final TelemetryStore store;
     private final SelectedHistory selectedHistory;
+    private final SelectedTrack selectedTrack;
     private final Set<WebSocketSession> sessions = new CopyOnWriteArraySet<>();
 
-    public KsdWebSocketHandler(ObjectMapper objectMapper, TelemetryStore store, SelectedHistory selectedHistory) {
+    public KsdWebSocketHandler(ObjectMapper objectMapper, TelemetryStore store, SelectedHistory selectedHistory, SelectedTrack selectedTrack) {
         this.objectMapper = objectMapper;
         this.store = store;
         this.selectedHistory = selectedHistory;
+        this.selectedTrack = selectedTrack;
     }
 
     @Override
@@ -103,6 +106,8 @@ public class KsdWebSocketHandler extends TextWebSocketHandler {
         for (SpaceObjectInput o : msg.spaceObjects()) {
             store.putTelemetry(o.id(), o.cart(), o.kep(), o.orbitRev(), o.orbitLegs(), o.orientation());
         }
+        // 位置は store から引くので、store へ反映した後で記録する
+        selectedTrack.record(msg.selectedId(), msg.currentTime(), msg.selectedState(), store);
         log.debug("Updated {} objects at t={}", msg.spaceObjects().size(), msg.currentTime());
     }
 

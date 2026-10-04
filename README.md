@@ -98,6 +98,8 @@ target\dist\KeplerianTelemetry\start.bat
 - 実際の太陽の方向から照らした地球
 - KSD 本体と同じ軌道線の描画（`orbitRev` が変わったオブジェクトだけ `?orbits=true` で取り直す）
 - KSD で選択中の宇宙機の対地速度・高度のグラフ（`GET /api/history`。画面左下に表示。横軸は選択からのゲーム内経過時間で、100 秒 → 300 秒 → 600 秒 → 1000 秒 → 直近 1000 秒のスライド表示。縦軸は表示中の値が収まる最小のスケールを選び、速度は 2.5 → 5 → 10 km/s、高度は 100 → 300 → 600 km と切り替わる（上限を超えた値はグラフの上端で切れる）。目盛りは左右とも最大値の 5 等分で、横線を共有する）
+- KSD で選択中の宇宙機の過去の軌跡（`GET /api/track`。軌道投入前のみ。地表に固定した座標で描くので、地球が自転しても射点から地表に沿って伸びる）
+- KSD で選択が変わると、画面側の選択と注視点もその機体（または地球）に合わせる。次に KSD で選択が変わるまでは、画面上で別の機体を選べる
 - REST API を 1 秒ごと（固定）にポーリングして自動更新
 
 ### カスタムクライアントの実装
@@ -224,7 +226,7 @@ KSD は軌道線（`orbitRev` / `orbitLegs`）を、**接続後の最初の `Tel
   "messageType": "Telemetry",
   "currentTime": 1609459200,
   "selectedId": 3,
-  "selectedState": { "surfaceSpeed": 7650.2, "altitude": 412000.5 },
+  "selectedState": { "surfaceSpeed": 7650.2, "altitude": 412000.5, "inOrbit": true },
   "spaceObjects": [
     {
       "id": 3,
@@ -263,6 +265,7 @@ KSD は軌道線（`orbitRev` / `orbitLegs`）を、**接続後の最初の `Tel
 | `selectedState` | object \| null | 選択中の宇宙機の飛行状態。宇宙機以外が選択されているとき・未選択なら `null` |
 | `selectedState.surfaceSpeed` | number | 対地速度（m/s）。親天体の自転と共回転する座標系での速さで、地上では 0 |
 | `selectedState.altitude` | number | 親天体の基準半径からの高度（メートル） |
+| `selectedState.inOrbit` | boolean | 周回軌道上か（近点高度がカーマンラインより上） |
 | `spaceObjects[].id` | number | オブジェクト ID |
 | `spaceObjects[].cart.pos` | Vector3 | 位置（メートル） |
 | `spaceObjects[].cart.vel` | Vector3 | 親天体に対する相対速度（m/s）。座標軸は `pos` と同じ |
@@ -385,6 +388,36 @@ KSD で選択中の宇宙機の、対地速度と高度の履歴を取得する�
 | `samples[].t` | number | 記録開始（選択）からのゲーム内経過時間（秒） |
 | `samples[].surfaceSpeed` | number | 対地速度（m/s） |
 | `samples[].altitude` | number | 高度（メートル） |
+
+---
+
+### GET /api/track
+
+KSD で選択中の宇宙機の過去の軌跡を取得する。KSD の実績軌道と同じく、**軌道投入前（打ち上げ・弾道飛行）だけ**を扱う。
+
+- サーバは KSD からテレメトリを受け取るたび（1 秒ごと）に、選択中の宇宙機の位置を親天体に固定した座標で記録する
+- 選択が切り替わったとき・軌道に投入されたとき（`selectedState.inOrbit` が true）・ゲーム内時刻が巻き戻ったときに破棄する
+- 前の点から 1m 未満しか動いていなければ記録しない（射点で待機している間など）。最大 3600 点
+
+**レスポンス（200 OK）**
+
+```json
+{
+  "selectedId": 100102,
+  "samples": [
+    { "t": 1792851981.0, "parentId": 4, "fixed": { "x": -3608123.4, "y": 4150321.9, "z": 3226471.3 } }
+  ]
+}
+```
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `selectedId` | number \| null | 軌跡の対象（KSD で選択中のオブジェクト ID） |
+| `samples[].t` | number | ゲーム内時刻（Unix 秒） |
+| `samples[].parentId` | number | 記録時の親天体 ID |
+| `samples[].fixed` | Vector3 | 親天体からの相対位置を、親天体の向き（`primeMeridian`, `east`, `north` の3軸）で表した成分（メートル） |
+
+描画するときは、親天体の**現在の** `pos` と `orientation` を使って `pos + x·primeMeridian + y·east + z·north` に戻す。
 
 ---
 
