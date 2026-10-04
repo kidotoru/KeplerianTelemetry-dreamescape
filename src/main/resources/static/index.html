@@ -47,10 +47,10 @@
     /* ── Data feed (bottom, between the chart and the detail panel) ── */
     #data-feed {
       position: fixed;
-      bottom: var(--panel-gap);
-      left: calc(var(--panel-gap) * 2 + var(--chart-width));
-      right: calc(var(--panel-gap) * 2 + var(--detail-width));
-      height: var(--bottom-panel-height);
+      left: var(--panel-gap);
+      width: var(--chart-width);
+      top: calc(var(--panel-gap) * 2 + var(--chart-width) / 2);            /* below the mission panel */
+      bottom: calc(var(--panel-gap) * 2 + var(--bottom-panel-height));    /* above the chart */
       border: 1px solid var(--panel-border);
       background: var(--panel-bg);
       padding: 10px 14px;
@@ -66,12 +66,9 @@
 
     #data-feed-text { will-change: transform; }
 
-    /* ── Top panels: mission clock + event log (left), ground track map (right) ── */
+    /* ── Mission clock + event log (top left) and ground track map (bottom right) ── */
     #mission-panel, #ground-track {
       position: fixed;
-      top: var(--panel-gap);
-      width: var(--chart-width);
-      height: calc(var(--chart-width) / 2);
       background: var(--panel-bg);
       border: 1px solid var(--panel-border);
       z-index: 11;
@@ -81,12 +78,20 @@
       text-shadow: 0 0 4px rgba(0, 0, 0, 0.9);
     }
     #mission-panel {
+      top: var(--panel-gap);
       left: var(--panel-gap);
+      width: var(--chart-width);
+      height: calc(var(--chart-width) / 2);
       padding: 12px 18px;
       display: none;               /* shown while KSD has a spacecraft selected */
       flex-direction: column;
     }
-    #ground-track { right: var(--panel-gap); }
+    #ground-track {
+      bottom: var(--panel-gap);
+      right: var(--panel-gap);
+      height: var(--bottom-panel-height);   /* same height as the chart */
+      width: calc(var(--bottom-panel-height) * 2); /* 2:1, so the map fills the panel */
+    }
     #ground-track canvas { width: 100%; height: 100%; display: block; }
 
     .mission-caption { font-size: 12px; letter-spacing: 0.12em; color: rgba(255, 255, 255, 0.6); }
@@ -104,8 +109,8 @@
       display: grid;
       grid-template-columns: 12ch 20ch 16ch 16ch; /* time | event | "ALT  12345.6 km" | "VEL 12.34 km/s" */
       column-gap: 1ch;
-      font-size: 13px;
-      line-height: 20px;
+      font-size: 15px;
+      line-height: 22px;
       white-space: pre;
     }
     .event-row .ev-name { color: #7fcf9c; }
@@ -121,7 +126,7 @@
        so padding with spaces alone wouldn't line up). */
     .feed-row {
       display: grid;
-      grid-template-columns: 30ch repeat(3, 23ch) repeat(3, 21ch); /* name | "POS X=" + 15 + " m" | "VEL X=" + 11 + " m/s" */
+      grid-template-columns: 30ch 20ch 16ch 16ch; /* name | "VEL X=" + 10 + " m/s" | "Y=" + 10 + " m/s" | "Z=" ... */
       column-gap: 1ch;
       height: 16px;               /* exactly one line, so chunks stay a whole number of lines */
       white-space: pre;
@@ -167,7 +172,7 @@
     #detail-panel {
       position: fixed;
       right: 12px;
-      bottom: 12px;
+      top: 12px;
       width: var(--detail-width);
       height: var(--bottom-panel-height);
       border: 1px solid var(--panel-border);
@@ -1136,10 +1141,10 @@
     }
 
     // ── Data feed (purely decorative) ────────────────────────────────────────
-    // Every object's name and position / velocity, one object per row
-    // ("POS X=  149604878 ..."), scrolling smoothly upward at a steady rate. Each time the rows queued below the panel run low, the latest
+    // Every object's name and velocity, one object per row
+    // ("VEL X=  7612.345 m/s Y= ..."), scrolling smoothly upward at a steady rate. Each time the rows queued below the panel run low, the latest
     // response is appended as a block; blocks scrolled out of view are dropped.
-    // Units are m and m/s, as received.
+    // Velocity is in m/s, as received.
     const dataFeedEl   = document.getElementById("data-feed");
     const dataFeedText = document.getElementById("data-feed-text");
     const DATA_FEED_LINE_HEIGHT   = 16;  // px, same as the CSS row height
@@ -1178,14 +1183,13 @@
     function feedBlock(objects) {
       const block = document.createElement("div");
       // Value right-aligned in a fixed number of columns after its label (all ASCII, so padding lines up)
-      const field = (label, v, digits, width, unit) =>
-        `${label}=${((v == null || !Number.isFinite(v)) ? "-" : v.toFixed(digits)).padStart(width)} ${unit}`;
+      const field = (label, v) =>
+        `${label}=${((v == null || !Number.isFinite(v)) ? "-" : v.toFixed(3)).padStart(10)} m/s`;
       for (const o of objects) {
-        const p = o.cart?.pos, v = o.cart?.vel;
+        const v = o.cart?.vel;
         block.appendChild(feedRow([
           fitName(o.name ?? String(o.id)),
-          field("POS X", p?.x, 0, 15, "m"), field("POS Y", p?.y, 0, 15, "m"), field("POS Z", p?.z, 0, 15, "m"),
-          field("VEL X", v?.x, 3, 11, "m/s"), field("VEL Y", v?.y, 3, 11, "m/s"), field("VEL Z", v?.z, 3, 11, "m/s"),
+          field("VEL X", v?.x), field("Y", v?.y), field("Z", v?.z),
         ]));
       }
       return block;
@@ -1329,14 +1333,17 @@
       const ctx = groundTrackCanvas.getContext("2d");
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, w, h);
-      const X = lon => (lon + 180) / 360 * w;
-      const Y = lat => (90 - lat) / 180 * h;
+      // The map keeps its 2:1 aspect, centred in the panel
+      const mw = Math.min(w, h * 2), mh = mw / 2;
+      const ox = (w - mw) / 2, oy = (h - mh) / 2;
+      const X = lon => ox + (lon + 180) / 360 * mw;
+      const Y = lat => oy + (90 - lat) / 180 * mh;
 
       // Map
       const img = earthTexture.image;
       if (img && img.complete && img.naturalWidth) {
         ctx.globalAlpha = 0.55;
-        ctx.drawImage(img, 0, 0, w, h);
+        ctx.drawImage(img, ox, oy, mw, mh);
         ctx.globalAlpha = 1;
       }
       if (!o) return;
@@ -1350,7 +1357,7 @@
         for (let lat = -88; lat < 90; lat += 4) {
           for (let lon = -178; lon < 180; lon += 4) {
             const cz = Math.cos(lat * d2r) * cs * Math.cos((lon - sLon) * d2r) + Math.sin(lat * d2r) * ss;
-            if (cz < 0) ctx.fillRect(X(lon - 2), Y(lat + 2), w / 90 + 0.5, h / 45 + 0.5);
+            if (cz < 0) ctx.fillRect(X(lon - 2), Y(lat + 2), mw / 90 + 0.5, mh / 45 + 0.5);
           }
         }
       }
@@ -1359,8 +1366,8 @@
       ctx.strokeStyle = "rgba(200, 216, 240, 0.15)";
       ctx.lineWidth = 1;
       ctx.beginPath();
-      for (let lon = -150; lon < 180; lon += 30) { ctx.moveTo(X(lon), 0); ctx.lineTo(X(lon), h); }
-      for (let lat = -60; lat <= 60; lat += 30) { ctx.moveTo(0, Y(lat)); ctx.lineTo(w, Y(lat)); }
+      for (let lon = -150; lon < 180; lon += 30) { ctx.moveTo(X(lon), oy); ctx.lineTo(X(lon), oy + mh); }
+      for (let lat = -60; lat <= 60; lat += 30) { ctx.moveTo(ox, Y(lat)); ctx.lineTo(ox + mw, Y(lat)); }
       ctx.stroke();
 
       // Polyline that breaks where it wraps around the ±180° edge
@@ -1417,8 +1424,8 @@
       ctx.font = `13px "Courier New", monospace`;
       ctx.fillStyle = "#ffffff";
       ctx.shadowColor = "rgba(0, 0, 0, 0.9)"; ctx.shadowBlur = 4;
-      ctx.fillText("GROUND TRACK", 10, 18);
-      ctx.fillText(`${sel.name ?? sel.id}  LAT ${fmtLat(now[0])}  LON ${fmtLon(now[1])}  ALT ${alt.toFixed(1)} km`, 10, h - 10);
+      ctx.fillText("GROUND TRACK", ox + 10, oy + 18);
+      ctx.fillText(`${sel.name ?? sel.id}  LAT ${fmtLat(now[0])}  LON ${fmtLon(now[1])}  ALT ${alt.toFixed(1)} km`, ox + 10, oy + mh - 10);
       ctx.shadowBlur = 0;
     }
 
