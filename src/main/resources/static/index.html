@@ -1164,8 +1164,13 @@
     let latestFeedObjects = null;
     let dataFeedOffset = 0;              // px scrolled past the top of the first block
 
+    // Fixed to the ground, so their velocity never leaves 0
+    const DATA_FEED_GROUND_TYPES = new Set(['ground', 'spacecenter']);
+
     function showDataFeed(data) {
-      latestFeedObjects = (data.objects ?? []).slice().sort((a, b) => a.id - b.id);
+      latestFeedObjects = (data.objects ?? [])
+        .filter(o => !DATA_FEED_GROUND_TYPES.has((o.type ?? "").trim().toLowerCase()))
+        .sort((a, b) => a.id - b.id);
     }
 
     // Cut a name to DATA_FEED_NAME_WIDTH half-width columns (full-width characters take 2)
