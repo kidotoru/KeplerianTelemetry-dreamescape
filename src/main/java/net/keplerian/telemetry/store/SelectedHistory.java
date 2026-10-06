@@ -2,7 +2,9 @@ package net.keplerian.telemetry.store;
 
 import net.keplerian.telemetry.model.HistorySample;
 import net.keplerian.telemetry.model.SelectedHistoryResponse;
+import net.keplerian.telemetry.model.KeplerianElements;
 import net.keplerian.telemetry.model.SelectedState;
+import net.keplerian.telemetry.model.SpaceObject;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayDeque;
@@ -11,7 +13,7 @@ import java.util.Deque;
 import java.util.Objects;
 
 /**
- * KSD で選択中の宇宙機の対地速度・高度の履歴。
+ * KSD で選択中の宇宙機の対地速度・高度・遠点高度・近点高度の履歴。
  * 選択が切り替わったら破棄して記録し直す。直近 WINDOW_SECONDS（ゲーム内時刻）ぶんだけ保持する。
  */
 @Component
@@ -25,12 +27,12 @@ public class SelectedHistory {
     private final Deque<HistorySample> samples = new ArrayDeque<>();
 
     /**
-     * Telemetry を1回受け取るごとに呼ぶ。
+     * Telemetry を1回受け取るごとに、store へ反映した後で呼ぶ（遠点・近点は store の軌道要素から求める）。
      * @param selectedId KSD で選択中のオブジェクト ID（未選択なら null）
      * @param currentTime ゲーム内時刻（Unix 秒）
      * @param state 選択中の宇宙機の状態。宇宙機以外が選択されているときは null（記録しない）
      */
-    public synchronized void record(Long selectedId, double currentTime, SelectedState state) {
+    public synchronized void record(Long selectedId, double currentTime, SelectedState state, TelemetryStore store) {
         if (!Objects.equals(selectedId, this.selectedId)) {
             this.selectedId = selectedId;
             samples.clear();
@@ -56,7 +58,21 @@ public class SelectedHistory {
             }
         }
 
-        samples.addLast(new HistorySample(t, state.surfaceSpeed(), state.altitude()));
+        Double apoapsis = null;
+        Double periapsis = null;
+        SpaceObject obj = store.get(selectedId).orElse(null);
+        SpaceObject parent = (obj != null && obj.parentId() != null) ? store.get(obj.parentId()).orElse(null) : null;
+        if (obj != null && obj.kep() != null && parent != null && parent.radius() != null) {
+            KeplerianElements k = obj.kep();
+            // KSD は軌道上でなくても（打ち上げ中も）毎フレーム位置・速度から軌道要素を求め直している。
+            // 双曲線では a の符号が経路によって揺れるので、近点半径は |a|×|1-e| で出す
+            periapsis = Math.abs(k.a()) * Math.abs(1.0 - k.e()) - parent.radius();
+            if (k.e() < 1.0) {
+                apoapsis = Math.abs(k.a()) * (1.0 + k.e()) - parent.radius();
+            }
+        }
+
+        samples.addLast(new HistorySample(t, state.surfaceSpeed(), state.altitude(), apoapsis, periapsis));
         while (samples.peekFirst().t() < t - WINDOW_SECONDS) {
             samples.removeFirst();
         }

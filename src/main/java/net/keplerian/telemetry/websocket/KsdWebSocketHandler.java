@@ -102,11 +102,11 @@ public class KsdWebSocketHandler extends TextWebSocketHandler {
     private void handleTelemetry(TelemetryMessage msg) {
         store.setCurrentTime((long) msg.currentTime());
         store.setSelection(msg.selectedId(), msg.selectedState());
-        selectedHistory.record(msg.selectedId(), msg.currentTime(), msg.selectedState());
         for (SpaceObjectInput o : msg.spaceObjects()) {
             store.putTelemetry(o.id(), o.cart(), o.kep(), o.orbitRev(), o.orbitLegs(), o.orientation());
         }
-        // 位置は store から引くので、store へ反映した後で記録する
+        // 位置・軌道要素は store から引くので、store へ反映した後で記録する
+        selectedHistory.record(msg.selectedId(), msg.currentTime(), msg.selectedState(), store);
         selectedTrack.record(msg.selectedId(), msg.currentTime(), msg.selectedState(), store);
         log.debug("Updated {} objects at t={}", msg.spaceObjects().size(), msg.currentTime());
     }

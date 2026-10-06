@@ -93,8 +93,8 @@
       height: var(--bottom-panel-height);   /* same height as the chart */
       width: calc(var(--bottom-panel-height) * 2); /* 2:1, so the map fills the panel */
     }
-    /* ── Left-middle panel (empty for now): same fixed size as the chart, directly above it ── */
-    #left-middle-panel {
+    /* ── Orbit chart (left middle): same fixed size as the flight chart, directly above it ── */
+    #orbit-chart {
       position: fixed;
       left: var(--panel-gap);
       bottom: calc(var(--panel-gap) * 2 + var(--bottom-panel-height));
@@ -105,6 +105,8 @@
       z-index: 11;
       pointer-events: none;
     }
+
+    #orbit-chart canvas { width: 100%; height: 100%; display: block; }
 
     #ground-track canvas { width: 100%; height: 100%; display: block; }
 
@@ -261,7 +263,7 @@
 
   <div id="flight-chart"><canvas id="flight-chart-canvas"></canvas></div>
 
-  <div id="left-middle-panel"></div>
+  <div id="orbit-chart"><canvas id="orbit-chart-canvas"></canvas></div>
 
   <div id="data-feed"><div id="data-feed-text"></div></div>
 
@@ -1091,6 +1093,106 @@
       return lastT <= sc.span ? [0, sc.span, sc] : [lastT - sc.span, lastT, sc];
     }
 
+    // Sizes the canvas to its box and returns the cleared context and the plot-area layout.
+    // Both charts are the same size, so their plot areas line up one above the other.
+    function beginChart(canvas) {
+      const dpr = window.devicePixelRatio || 1;
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+        canvas.width  = Math.round(w * dpr);
+        canvas.height = Math.round(h * dpr);
+      }
+      const ctx = canvas.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+
+      const fontPx = Math.max(10, Math.round(h / 24));
+      const pad = { left: fontPx * 5.2, right: fontPx * 5.2, top: fontPx * 1.2, bottom: fontPx * 3.4 };
+      return { ctx, w, h, fontPx, pad, pw: w - pad.left - pad.right, ph: h - pad.top - pad.bottom };
+    }
+
+    // Time ticks and labels, the plot frame and the time axis title
+    function drawTimeAxis(c, t0, t1, timeScale) {
+      const { ctx, fontPx, pad, pw, ph } = c;
+      const xOf = t => pad.left + (t - t0) / (t1 - t0) * pw;
+      ctx.font = `${fontPx}px "Courier New", monospace`;
+      ctx.lineWidth = 1;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = CHART_AXIS_COLOR;
+      ctx.strokeStyle = CHART_AXIS_COLOR;
+      for (let t = Math.ceil(t0 / timeScale.tick) * timeScale.tick; t <= t1 + 1e-9; t += timeScale.tick) {
+        const x = xOf(t);
+        ctx.beginPath(); ctx.moveTo(x, pad.top + ph); ctx.lineTo(x, pad.top + ph + fontPx * 0.4); ctx.stroke();
+        if (Math.round(t) % timeScale.label === 0) {
+          ctx.fillText(String(Math.round(t)), x, pad.top + ph + fontPx * 0.6);
+        }
+      }
+
+      ctx.beginPath();
+      ctx.moveTo(pad.left, pad.top); ctx.lineTo(pad.left, pad.top + ph);
+      ctx.lineTo(pad.left + pw, pad.top + ph); ctx.lineTo(pad.left + pw, pad.top);
+      ctx.stroke();
+
+      ctx.font = `${Math.round(fontPx * 1.05)}px "Courier New", monospace`;
+      ctx.textBaseline = 'middle';
+      ctx.fillText('TIME [sec]', pad.left + pw / 2, pad.top + ph + fontPx * 2.3);
+    }
+
+    // Kármán line (the dashboard shows the Earth), dashed across the plot at height y
+    const CHART_KARMAN_KM = 100;
+    function drawKarmanLine(c, y) {
+      const { ctx, fontPx, pad, pw } = c;
+      ctx.save();
+      ctx.setLineDash([6, 4]);
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(200, 216, 240, 0.45)';
+      ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + pw, y); ctx.stroke();
+      ctx.font = `${fontPx}px "Courier New", monospace`;
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'bottom';
+      ctx.fillStyle = 'rgba(200, 216, 240, 0.6)';
+      ctx.fillText('KARMAN LINE', pad.left + pw - fontPx * 0.4, y - 2);
+      ctx.restore();
+    }
+
+    // A y-axis title rotated along the left (side < 0) or right (side > 0) edge
+    function drawYTitle(c, text, color, side) {
+      const { ctx, w, fontPx, pad, ph } = c;
+      ctx.save();
+      ctx.font = `${Math.round(fontPx * 1.05)}px "Courier New", monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.translate(side < 0 ? fontPx * 1.1 : w - fontPx * 1.1, pad.top + ph / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillStyle = color;
+      ctx.fillText(text, 0, 0);
+      ctx.restore();
+    }
+
+    // One series through the samples, clipped to the plot area (values beyond the
+    // largest scale run off the edge). yOf returns null where the value is missing,
+    // which breaks the line there.
+    function plotSeries(c, samples, xOf, yOf, color) {
+      const { ctx, pad, pw, ph } = c;
+      ctx.save();
+      ctx.beginPath(); ctx.rect(pad.left, pad.top, pw, ph); ctx.clip();
+      ctx.lineWidth = 2;
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = color;
+      ctx.beginPath();
+      let pen = false;
+      for (const p of samples) {
+        const y = yOf(p);
+        if (y == null) { pen = false; continue; }
+        if (pen) ctx.lineTo(xOf(p.t), y); else ctx.moveTo(xOf(p.t), y);
+        pen = true;
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+
     // Always shown. While something other than a spacecraft is selected (no samples),
     // keep drawing the last spacecraft's history; before any, just the empty axes.
     let lastChartSamples = [];
@@ -1100,21 +1202,8 @@
       }
       const samples = lastChartSamples;
 
-      const dpr = window.devicePixelRatio || 1;
-      const w = flightChartCanvas.clientWidth;
-      const h = flightChartCanvas.clientHeight;
-      if (flightChartCanvas.width !== Math.round(w * dpr) || flightChartCanvas.height !== Math.round(h * dpr)) {
-        flightChartCanvas.width  = Math.round(w * dpr);
-        flightChartCanvas.height = Math.round(h * dpr);
-      }
-      const ctx = flightChartCanvas.getContext('2d');
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, w, h);
-
-      const fontPx = Math.max(10, Math.round(h / 24));
-      const pad = { left: fontPx * 5.2, right: fontPx * 5.2, top: fontPx * 1.2, bottom: fontPx * 3.4 };
-      const pw = w - pad.left - pad.right;
-      const ph = h - pad.top - pad.bottom;
+      const c = beginChart(flightChartCanvas);
+      const { ctx, fontPx, pad, pw, ph } = c;
       const [t0, t1, timeScale] = chartTimeRange(samples.length ? samples[samples.length - 1].t : 0);
       const speedScale = pickScale(CHART_SPEED_SCALES, Math.max(...samples.map(p => p.surfaceSpeed)) / 1000);
       const altScale   = pickScale(CHART_ALT_SCALES,   Math.max(...samples.map(p => p.altitude)) / 1000);
@@ -1139,64 +1228,67 @@
         ctx.fillText(String(Math.round(k * altScale.max / CHART_Y_DIVISIONS)), pad.left + pw + fontPx * 0.5, y);
       }
 
-      // Time ticks
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'top';
-      ctx.fillStyle = CHART_AXIS_COLOR;
-      for (let t = Math.ceil(t0 / timeScale.tick) * timeScale.tick; t <= t1 + 1e-9; t += timeScale.tick) {
-        const x = xOf(t);
-        ctx.strokeStyle = CHART_AXIS_COLOR;
-        ctx.beginPath(); ctx.moveTo(x, pad.top + ph); ctx.lineTo(x, pad.top + ph + fontPx * 0.4); ctx.stroke();
-        if (Math.round(t) % timeScale.label === 0) {
-          ctx.fillText(String(Math.round(t)), x, pad.top + ph + fontPx * 0.6);
-        }
-      }
+      drawKarmanLine(c, yAlt(CHART_KARMAN_KM));   // on the altitude (right) axis
+      drawTimeAxis(c, t0, t1, timeScale);
+      drawYTitle(c, 'SURFACE VELOCITY [km/s]', CHART_SPEED_COLOR, -1);
+      drawYTitle(c, 'ALTITUDE [km]', CHART_ALT_COLOR, 1);
 
-      // Axes
-      ctx.strokeStyle = CHART_AXIS_COLOR;
-      ctx.beginPath();
-      ctx.moveTo(pad.left, pad.top); ctx.lineTo(pad.left, pad.top + ph);
-      ctx.lineTo(pad.left + pw, pad.top + ph); ctx.lineTo(pad.left + pw, pad.top);
-      ctx.stroke();
-
-      // Axis titles
-      ctx.font = `${Math.round(fontPx * 1.05)}px "Courier New", monospace`;
-      ctx.textBaseline = 'middle';
-      ctx.fillStyle = CHART_AXIS_COLOR;
-      ctx.fillText('TIME [sec]', pad.left + pw / 2, pad.top + ph + fontPx * 2.3);
-      ctx.save();
-      ctx.translate(fontPx * 1.1, pad.top + ph / 2);
-      ctx.rotate(-Math.PI / 2);
-      ctx.fillStyle = CHART_SPEED_COLOR;
-      ctx.fillText('SURFACE VELOCITY [km/s]', 0, 0);
-      ctx.restore();
-      ctx.save();
-      ctx.translate(w - fontPx * 1.1, pad.top + ph / 2);
-      ctx.rotate(-Math.PI / 2);
-      ctx.fillStyle = CHART_ALT_COLOR;
-      ctx.fillText('ALTITUDE [km]', 0, 0);
-      ctx.restore();
-
-      // Data lines, clipped to the plot area (values beyond the largest scale run off the top)
-      ctx.save();
-      ctx.beginPath(); ctx.rect(pad.left, pad.top, pw, ph); ctx.clip();
-      ctx.lineWidth = 2;
-      ctx.lineJoin = 'round';
-      const plot = (color, yOf) => {
-        ctx.strokeStyle = color;
-        ctx.beginPath();
-        samples.forEach((p, i) => {
-          const x = xOf(p.t), y = yOf(p);
-          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-        });
-        ctx.stroke();
-      };
-      plot(CHART_ALT_COLOR,   p => yAlt(p.altitude / 1000));
-      plot(CHART_SPEED_COLOR, p => ySpeed(p.surfaceSpeed / 1000));
-      ctx.restore();
+      plotSeries(c, samples, xOf, p => yAlt(p.altitude / 1000), CHART_ALT_COLOR);
+      plotSeries(c, samples, xOf, p => ySpeed(p.surfaceSpeed / 1000), CHART_SPEED_COLOR);
     }
 
-    window.addEventListener('resize', () => drawFlightChart(lastHistory));
+    // ── Orbit chart (above the flight chart) ─────────────────────────────────
+    // Apoapsis and periapsis altitudes of the same spacecraft on the same time axis.
+    // During the ascent the periapsis is below the surface (off the bottom of the
+    // chart) and climbs into view; the moment it crosses the Kármán line is the
+    // orbit insertion.
+    // The y axis runs from 0 (the surface) to max, max stepping up with the highest
+    // apoapsis shown (values above the largest scale run off the top).
+    const ORBIT_SCALES = [100, 300, 600, 1200, 3000, 6000, 12000, 30000, 60000, 120000, 300000, 600000].map(max => ({ max })); // km
+    const ORBIT_Y_DIVISIONS = CHART_Y_DIVISIONS;   // same as the flight chart (e.g. 300 km → 60, 120, ...)
+    const ORBIT_AP_COLOR    = '#5ec8ff';   // light blue
+    const ORBIT_PE_COLOR    = '#ff6fae';   // pink
+    const orbitChartCanvas  = document.getElementById('orbit-chart-canvas');
+
+    function drawOrbitChart() {
+      const samples = lastChartSamples;   // kept by drawFlightChart
+      const c = beginChart(orbitChartCanvas);
+      const { ctx, fontPx, pad, pw, ph } = c;
+      const [t0, t1, timeScale] = chartTimeRange(samples.length ? samples[samples.length - 1].t : 0);
+      const apMax = Math.max(0, ...samples.filter(p => p.apoapsis != null).map(p => p.apoapsis / 1000));
+      const scale = pickScale(ORBIT_SCALES, apMax);
+      const xOf = t => pad.left + (t - t0) / (t1 - t0) * pw;
+      const yOf = km => pad.top + ph - km / scale.max * ph;
+
+      // Horizontal grid, labelled on both sides in the colour of that side's line
+      ctx.font = `${fontPx}px "Courier New", monospace`;
+      ctx.lineWidth = 1;
+      ctx.textBaseline = 'middle';
+      for (let k = 0; k <= ORBIT_Y_DIVISIONS; k++) {
+        const km = k * scale.max / ORBIT_Y_DIVISIONS;
+        const y = yOf(km);
+        ctx.strokeStyle = CHART_GRID_COLOR;
+        ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + pw, y); ctx.stroke();
+        ctx.fillStyle = ORBIT_AP_COLOR;
+        ctx.textAlign = 'right';
+        ctx.fillText(String(Math.round(km)), pad.left - fontPx * 0.5, y);
+        ctx.fillStyle = ORBIT_PE_COLOR;
+        ctx.textAlign = 'left';
+        ctx.fillText(String(Math.round(km)), pad.left + pw + fontPx * 0.5, y);
+      }
+
+      // The periapsis crossing the Kármán line is the orbit insertion
+      drawKarmanLine(c, yOf(CHART_KARMAN_KM));
+
+      drawTimeAxis(c, t0, t1, timeScale);
+      drawYTitle(c, 'APOAPSIS [km]', ORBIT_AP_COLOR, -1);
+      drawYTitle(c, 'PERIAPSIS [km]', ORBIT_PE_COLOR, 1);
+
+      plotSeries(c, samples, xOf, p => p.apoapsis  == null ? null : yOf(p.apoapsis / 1000),  ORBIT_AP_COLOR);
+      plotSeries(c, samples, xOf, p => p.periapsis == null ? null : yOf(p.periapsis / 1000), ORBIT_PE_COLOR);
+    }
+
+    window.addEventListener('resize', () => { drawFlightChart(lastHistory); drawOrbitChart(); });
 
     async function fetchHistory() {
       try {
@@ -1206,6 +1298,7 @@
         console.warn(`[history] ${e.message}`);
       }
       drawFlightChart(lastHistory);
+      drawOrbitChart();
     }
 
     // ── Data feed (purely decorative) ────────────────────────────────────────
