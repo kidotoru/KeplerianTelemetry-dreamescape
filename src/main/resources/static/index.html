@@ -911,8 +911,8 @@
     // restarts it when the selection changes); this only draws it.
     // Each axis steps up through these scales as the values grow; the last
     // one is the ceiling (values beyond it run off the top).
-    const CHART_SPEED_SCALES = [{ max: 2.5 }, { max: 5 }, { max: 10 }];  // km/s, left axis
-    const CHART_ALT_SCALES   = [{ max: 100 }, { max: 300 }, { max: 600 }, { max: 1200 }]; // km, right axis
+    const CHART_SPEED_SCALES = [{ max: 2.5 }, { max: 5 }, { max: 10 }];  // km/s, right axis
+    const CHART_ALT_SCALES   = [{ max: 100 }, { max: 300 }, { max: 600 }, { max: 1200 }]; // km, left axis (km on the left, like the orbit chart above)
     // Both y axes share the same horizontal grid: always this many divisions, so
     // each label is max / CHART_Y_DIVISIONS × k and the left/right labels line up
     const CHART_Y_DIVISIONS = 5;
@@ -1070,18 +1070,18 @@
         const y = pad.top + ph - (k / CHART_Y_DIVISIONS) * ph;
         ctx.strokeStyle = CHART_GRID_COLOR;
         ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + pw, y); ctx.stroke();
-        ctx.fillStyle = CHART_SPEED_COLOR;
-        ctx.textAlign = 'right';
-        ctx.fillText((k * speedScale.max / CHART_Y_DIVISIONS).toFixed(1), pad.left - fontPx * 0.5, y);
         ctx.fillStyle = CHART_ALT_COLOR;
+        ctx.textAlign = 'right';
+        ctx.fillText(String(Math.round(k * altScale.max / CHART_Y_DIVISIONS)), pad.left - fontPx * 0.5, y);
+        ctx.fillStyle = CHART_SPEED_COLOR;
         ctx.textAlign = 'left';
-        ctx.fillText(String(Math.round(k * altScale.max / CHART_Y_DIVISIONS)), pad.left + pw + fontPx * 0.5, y);
+        ctx.fillText((k * speedScale.max / CHART_Y_DIVISIONS).toFixed(1), pad.left + pw + fontPx * 0.5, y);
       }
 
-      drawKarmanLine(c, yAlt(CHART_KARMAN_KM));   // on the altitude (right) axis
+      drawKarmanLine(c, yAlt(CHART_KARMAN_KM));   // on the altitude (left) axis
       drawTimeAxis(c, t0, t1, timeScale);
-      drawYTitle(c, 'SURFACE VELOCITY [km/s]', CHART_SPEED_COLOR, -1);
-      drawYTitle(c, 'ALTITUDE [km]', CHART_ALT_COLOR, 1);
+      drawYTitle(c, 'ALTITUDE [km]', CHART_ALT_COLOR, -1);
+      drawYTitle(c, 'SURFACE VELOCITY [km/s]', CHART_SPEED_COLOR, 1);
 
       plotSeries(c, samples, xOf, p => yAlt(p.altitude / 1000), CHART_ALT_COLOR);
       plotSeries(c, samples, xOf, p => ySpeed(p.surfaceSpeed / 1000), CHART_SPEED_COLOR);
