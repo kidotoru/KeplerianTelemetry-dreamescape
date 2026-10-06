@@ -13,7 +13,7 @@ import java.util.Deque;
 import java.util.Objects;
 
 /**
- * KSD で選択中の宇宙機の対地速度・高度・遠点高度・近点高度の履歴。
+ * KSD で選択中の宇宙機の対地速度・高度・遠点高度・近点高度・離心率の履歴。
  * 選択が切り替わったら破棄して記録し直す。直近 WINDOW_SECONDS（ゲーム内時刻）ぶんだけ保持する。
  */
 @Component
@@ -60,19 +60,22 @@ public class SelectedHistory {
 
         Double apoapsis = null;
         Double periapsis = null;
+        Double eccentricity = null;
         SpaceObject obj = store.get(selectedId).orElse(null);
         SpaceObject parent = (obj != null && obj.parentId() != null) ? store.get(obj.parentId()).orElse(null) : null;
-        if (obj != null && obj.kep() != null && parent != null && parent.radius() != null) {
+        // KSD は軌道上でなくても（打ち上げ中も）毎フレーム位置・速度から軌道要素を求め直している。
+        // 発射台で待機している間は求めておらず a = 0 のままなので、記録しない
+        if (obj != null && obj.kep() != null && obj.kep().a() != 0.0 && parent != null && parent.radius() != null) {
             KeplerianElements k = obj.kep();
-            // KSD は軌道上でなくても（打ち上げ中も）毎フレーム位置・速度から軌道要素を求め直している。
             // 双曲線では a の符号が経路によって揺れるので、近点半径は |a|×|1-e| で出す
             periapsis = Math.abs(k.a()) * Math.abs(1.0 - k.e()) - parent.radius();
             if (k.e() < 1.0) {
                 apoapsis = Math.abs(k.a()) * (1.0 + k.e()) - parent.radius();
             }
+            eccentricity = k.e();
         }
 
-        samples.addLast(new HistorySample(t, state.surfaceSpeed(), state.altitude(), apoapsis, periapsis));
+        samples.addLast(new HistorySample(t, state.surfaceSpeed(), state.altitude(), apoapsis, periapsis, eccentricity));
         while (samples.peekFirst().t() < t - WINDOW_SECONDS) {
             samples.removeFirst();
         }

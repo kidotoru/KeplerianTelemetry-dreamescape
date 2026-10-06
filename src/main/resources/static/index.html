@@ -23,24 +23,11 @@
       z-index: 0;
     }
 
-    /* ── UI overlay ── */
-    #ui {
-      position: fixed;
-      inset: 0;
-      z-index: 10;
-      display: flex;
-      flex-direction: column;
-      pointer-events: none;
-    }
-
-    #detail-panel { pointer-events: auto; }
-
     :root {
       --chart-width: min(42vw, 680px);
       --bottom-panel-height: calc(var(--chart-width) * 3 / 5); /* the chart is 5:3 */
-      --detail-width: 340px;
       --panel-gap: 12px;
-      --panel-bg: rgba(28, 44, 68, 0.4);      /* shared by the chart, data feed and detail panel */
+      --panel-bg: rgba(28, 44, 68, 0.4);      /* shared by every panel */
       --panel-border: rgba(60, 90, 130, 0.5);
     }
 
@@ -166,67 +153,6 @@
 
     #flight-chart canvas { width: 100%; height: 100%; display: block; }
 
-    /* ── Layout ── */
-    .layout {
-      display: flex;
-      flex: 1;
-      overflow: hidden;
-    }
-
-    /* ── Right content area (transparent, passes clicks to canvas) ── */
-    #content {
-      flex: 1;
-      padding: 20px;
-      display: flex;
-      justify-content: flex-end;
-      align-items: flex-start;
-      pointer-events: none;
-    }
-
-    /* ── Detail panel ── */
-    #detail-panel {
-      position: fixed;
-      right: 12px;
-      top: 12px;
-      width: var(--detail-width);
-      height: var(--bottom-panel-height);
-      border: 1px solid var(--panel-border);
-      background: var(--panel-bg);
-      color: #ffffff;
-      text-shadow: 0 0 4px rgba(0, 0, 0, 0.9); /* keeps the text readable over the globe */
-      padding: 14px 20px;
-      display: none;             /* shown as flex by showDetail() */
-      flex-direction: column;
-      justify-content: space-between;
-      overflow: hidden;
-      pointer-events: auto;
-    }
-
-    #detail-name {
-      font-size: 20px;
-      color: #ffffff;
-      text-align: center;
-      margin-bottom: 4px;
-      letter-spacing: 0.1em;
-    }
-
-    .section-title {
-      font-size: 13px;
-      color: #ffffff;
-      letter-spacing: 0.08em;
-      margin-top: 8px;
-    }
-
-    .field-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: baseline;
-      padding: 2px 0;
-    }
-
-    .field-label { font-size: 13px; color: #ffffff; letter-spacing: 0.04em; }
-    .field-value { font-size: 13px; color: #ffffff; font-variant-numeric: tabular-nums; margin-left: 8px; }
-
     /* ── 3D body labels (rendered by CSS2DRenderer) ── */
     .body-label {
       font-family: "Courier New", monospace;
@@ -275,31 +201,6 @@
   </div>
 
   <div id="ground-track"><canvas id="ground-track-canvas"></canvas></div>
-
-  <div id="ui">
-    <div class="layout">
-      <div id="content">
-        <div id="detail-panel">
-          <div id="detail-name"></div>
-          <div class="section-title">Keplerian Elements</div>
-          <div class="field-row"><span class="field-label">Epoch</span><span class="field-value" id="d-epoch">—</span></div>
-          <div class="field-row"><span class="field-label">SMA</span><span class="field-value" id="d-sma">—</span></div>
-          <div class="field-row"><span class="field-label">ECC</span><span class="field-value" id="d-ecc">—</span></div>
-          <div class="field-row"><span class="field-label">INC  (°)</span><span class="field-value" id="d-inc">—</span></div>
-          <div class="field-row"><span class="field-label">RAAN (°)</span><span class="field-value" id="d-raan">—</span></div>
-          <div class="field-row"><span class="field-label">ARGP (°)</span><span class="field-value" id="d-argp">—</span></div>
-          <div class="field-row"><span class="field-label">MA   (°)</span><span class="field-value" id="d-ma">—</span></div>
-          <div class="section-title">Cartesian Elements (Earth-relative)</div>
-          <div class="field-row"><span class="field-label">POS X</span><span class="field-value" id="d-px">—</span></div>
-          <div class="field-row"><span class="field-label">POS Y</span><span class="field-value" id="d-py">—</span></div>
-          <div class="field-row"><span class="field-label">POS Z</span><span class="field-value" id="d-pz">—</span></div>
-          <div class="field-row"><span class="field-label">VEL X</span><span class="field-value" id="d-vx">—</span></div>
-          <div class="field-row"><span class="field-label">VEL Y</span><span class="field-value" id="d-vy">—</span></div>
-          <div class="field-row"><span class="field-label">VEL Z</span><span class="field-value" id="d-vz">—</span></div>
-        </div>
-      </div>
-    </div>
-  </div>
 
   <script type="importmap">
   {
@@ -559,7 +460,6 @@
     function selectObject(id) {
       selectedId = id;
       focusOn(id);
-      showDetail();
       updateScene();
     }
 
@@ -961,8 +861,6 @@
     }
 
     // ── UI logic ──────────────────────────────────────────────────────────────
-    const detailPanelEl  = document.getElementById("detail-panel");
-
     const POLL_INTERVAL_MS = 1000; // fixed: refresh once per second
     let objectsById = {};    // all objects by id (orbit legs may be relative to non-Earth parents)
     let earthObj   = null;   // the Earth SpaceObject, or null until telemetry arrives
@@ -970,53 +868,6 @@
     let spacecraft = [];     // objects whose parentId === earthObj.id
     let selectedId = null;   // number (spacecraft id) or EARTH_MARKER_ID
     let lastKsdSelectedId;   // selectedId last reported by KSD (undefined until the first poll)
-
-    function fmtNum(n, d) { return n == null ? "—" : Number(n).toFixed(d); }
-    function fmtUnit(n, d, unit) { return n == null ? "—" : `${Number(n).toFixed(d)} ${unit}`; }
-    function fmtEpoch(ep) {
-      if (ep == null) return "—";
-      return new Date(ep * 1000).toISOString().replace("T", " ").slice(0, 19);
-    }
-
-    function showDetail() {
-      if (selectedId === EARTH_MARKER_ID && earthObj) {
-        detailPanelEl.style.display = "flex";
-        document.getElementById("detail-name").textContent = "EARTH";
-        document.getElementById("d-epoch").textContent = fmtEpoch(earthObj.kep?.ep);
-        document.getElementById("d-sma").textContent   = fmtNum(earthObj.kep?.a,    3);
-        document.getElementById("d-ecc").textContent   = fmtNum(earthObj.kep?.e,    7);
-        document.getElementById("d-inc").textContent   = fmtNum(earthObj.kep?.i,    4);
-        document.getElementById("d-raan").textContent  = fmtNum(earthObj.kep?.raan, 2);
-        document.getElementById("d-argp").textContent  = fmtNum(earthObj.kep?.argp, 2);
-        document.getElementById("d-ma").textContent    = fmtNum(earthObj.kep?.ma,   2);
-        document.getElementById("d-px").textContent    = fmtUnit(0, 3, "m");
-        document.getElementById("d-py").textContent    = fmtUnit(0, 3, "m");
-        document.getElementById("d-pz").textContent    = fmtUnit(0, 3, "m");
-        document.getElementById("d-vx").textContent    = "—";
-        document.getElementById("d-vy").textContent    = "—";
-        document.getElementById("d-vz").textContent    = "—";
-        return;
-      }
-
-      const obj = spacecraft.find(o => o.id === selectedId);
-      if (!obj) { detailPanelEl.style.display = "none"; return; }
-      const ePos = earthObj?.cart?.pos;
-      detailPanelEl.style.display = "flex";
-      document.getElementById("detail-name").textContent = obj.name ?? obj.id;
-      document.getElementById("d-epoch").textContent = fmtEpoch(obj.kep?.ep);
-      document.getElementById("d-sma").textContent   = fmtNum(obj.kep?.a,    3);
-      document.getElementById("d-ecc").textContent   = fmtNum(obj.kep?.e,    7);
-      document.getElementById("d-inc").textContent   = fmtNum(obj.kep?.i,    4);
-      document.getElementById("d-raan").textContent  = fmtNum(obj.kep?.raan, 2);
-      document.getElementById("d-argp").textContent  = fmtNum(obj.kep?.argp, 2);
-      document.getElementById("d-ma").textContent    = fmtNum(obj.kep?.ma,   2);
-      document.getElementById("d-px").textContent    = fmtUnit(obj.cart?.pos && ePos ? obj.cart.pos.x - ePos.x : null, 3, "m");
-      document.getElementById("d-py").textContent    = fmtUnit(obj.cart?.pos && ePos ? obj.cart.pos.y - ePos.y : null, 3, "m");
-      document.getElementById("d-pz").textContent    = fmtUnit(obj.cart?.pos && ePos ? obj.cart.pos.z - ePos.z : null, 3, "m");
-      document.getElementById("d-vx").textContent    = fmtUnit(obj.cart?.vel?.x, 9, "m/s");
-      document.getElementById("d-vy").textContent    = fmtUnit(obj.cart?.vel?.y, 9, "m/s");
-      document.getElementById("d-vz").textContent    = fmtUnit(obj.cart?.vel?.z, 9, "m/s");
-    }
 
     function render(data) {
       const objects = (data.objects ?? []).slice().sort((a, b) => a.id - b.id);
@@ -1048,7 +899,6 @@
         selectedId = earthObj ? EARTH_MARKER_ID : null;
       }
 
-      showDetail();
       updateScene();
       updateLaunchCamera(data.selectedInOrbit);
       updateMissionPanel(data);
@@ -1238,16 +1088,16 @@
     }
 
     // ── Orbit chart (above the flight chart) ─────────────────────────────────
-    // Apoapsis and periapsis altitudes of the same spacecraft on the same time axis.
-    // During the ascent the periapsis is below the surface (off the bottom of the
-    // chart) and climbs into view; the moment it crosses the Kármán line is the
-    // orbit insertion.
-    // The y axis runs from 0 (the surface) to max, max stepping up with the highest
-    // apoapsis shown (values above the largest scale run off the top).
+    // Apoapsis altitude (left axis) and eccentricity (right axis) of the same
+    // spacecraft on the same time axis. During the ascent the eccentricity starts
+    // near 1 (a steep ballistic arc) and falls as the orbit rounds out.
+    // The apoapsis axis runs from 0 (the surface) to max, max stepping up with the
+    // highest apoapsis shown (values above the largest scale run off the top).
+    // The eccentricity axis is fixed at 0..1 (hyperbolic values run off the top).
     const ORBIT_SCALES = [100, 300, 600, 1200, 3000, 6000, 12000, 30000, 60000, 120000, 300000, 600000].map(max => ({ max })); // km
     const ORBIT_Y_DIVISIONS = CHART_Y_DIVISIONS;   // same as the flight chart (e.g. 300 km → 60, 120, ...)
     const ORBIT_AP_COLOR    = '#5ec8ff';   // light blue
-    const ORBIT_PE_COLOR    = '#ff6fae';   // pink
+    const ORBIT_ECC_COLOR   = '#ff6fae';   // pink
     const orbitChartCanvas  = document.getElementById('orbit-chart-canvas');
 
     function drawOrbitChart() {
@@ -1258,7 +1108,8 @@
       const apMax = Math.max(0, ...samples.filter(p => p.apoapsis != null).map(p => p.apoapsis / 1000));
       const scale = pickScale(ORBIT_SCALES, apMax);
       const xOf = t => pad.left + (t - t0) / (t1 - t0) * pw;
-      const yOf = km => pad.top + ph - km / scale.max * ph;
+      const yOf    = km => pad.top + ph - km / scale.max * ph;
+      const yOfEcc = e  => pad.top + ph - e * ph;
 
       // Horizontal grid, labelled on both sides in the colour of that side's line
       ctx.font = `${fontPx}px "Courier New", monospace`;
@@ -1272,20 +1123,19 @@
         ctx.fillStyle = ORBIT_AP_COLOR;
         ctx.textAlign = 'right';
         ctx.fillText(String(Math.round(km)), pad.left - fontPx * 0.5, y);
-        ctx.fillStyle = ORBIT_PE_COLOR;
+        ctx.fillStyle = ORBIT_ECC_COLOR;
         ctx.textAlign = 'left';
-        ctx.fillText(String(Math.round(km)), pad.left + pw + fontPx * 0.5, y);
+        ctx.fillText((k / ORBIT_Y_DIVISIONS).toFixed(1), pad.left + pw + fontPx * 0.5, y);
       }
 
-      // The periapsis crossing the Kármán line is the orbit insertion
-      drawKarmanLine(c, yOf(CHART_KARMAN_KM));
+      drawKarmanLine(c, yOf(CHART_KARMAN_KM));   // on the apoapsis (left) axis
 
       drawTimeAxis(c, t0, t1, timeScale);
       drawYTitle(c, 'APOAPSIS [km]', ORBIT_AP_COLOR, -1);
-      drawYTitle(c, 'PERIAPSIS [km]', ORBIT_PE_COLOR, 1);
+      drawYTitle(c, 'ECCENTRICITY', ORBIT_ECC_COLOR, 1);
 
-      plotSeries(c, samples, xOf, p => p.apoapsis  == null ? null : yOf(p.apoapsis / 1000),  ORBIT_AP_COLOR);
-      plotSeries(c, samples, xOf, p => p.periapsis == null ? null : yOf(p.periapsis / 1000), ORBIT_PE_COLOR);
+      plotSeries(c, samples, xOf, p => p.apoapsis     == null ? null : yOf(p.apoapsis / 1000), ORBIT_AP_COLOR);
+      plotSeries(c, samples, xOf, p => p.eccentricity == null ? null : yOfEcc(p.eccentricity), ORBIT_ECC_COLOR);
     }
 
     window.addEventListener('resize', () => { drawFlightChart(lastHistory); drawOrbitChart(); });
@@ -1599,7 +1449,7 @@
       ctx.fillStyle = "#ffffff";
       ctx.shadowColor = "rgba(0, 0, 0, 0.9)"; ctx.shadowBlur = 4;
       ctx.fillText("GROUND TRACK", ox + 10, oy + 18);
-      ctx.fillText(`${sel.name ?? sel.id}  LAT ${fmtLat(now[0])}  LON ${fmtLon(now[1])}  ALT ${alt.toFixed(1)} km`, ox + 10, oy + mh - 10);
+      ctx.fillText(`LAT ${fmtLat(now[0])}  LON ${fmtLon(now[1])}  ALT ${alt.toFixed(1)} km`, ox + 10, oy + mh - 10);
       ctx.shadowBlur = 0;
     }
 
