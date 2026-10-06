@@ -93,6 +93,18 @@
       pointer-events: none;
     }
 
+    /* ── Logo (top right). Sized and placed in viewport units so it takes the same
+       share of the screen at any resolution ── */
+    #logo {
+      position: fixed;
+      top: 1.2vw;
+      right: 1.2vw;
+      width: 20vw;               /* height follows the image's aspect */
+      height: auto;
+      z-index: 11;
+      pointer-events: none;
+    }
+
     #orbit-chart canvas { width: 100%; height: 100%; display: block; }
 
     #ground-track canvas { width: 100%; height: 100%; display: block; }
@@ -199,6 +211,8 @@
     <div class="mission-caption">FLIGHT EVENTS</div>
     <div id="event-log"></div>
   </div>
+
+  <img id="logo" src="img/logo.png" alt="Keplerian Space Discovery">
 
   <div id="ground-track"><canvas id="ground-track-canvas"></canvas></div>
 
@@ -928,6 +942,7 @@
     const CHART_ALT_COLOR     = '#ff9f43'; // orange
     const CHART_AXIS_COLOR    = 'rgba(200, 216, 240, 0.85)';
     const CHART_GRID_COLOR    = 'rgba(200, 216, 240, 0.12)';
+    const CHART_TICK_FONT     = '15px "Courier New", monospace'; // tick numbers: same size as the flight events (.event-row)
     const flightChartEl     = document.getElementById('flight-chart');
     const flightChartCanvas = document.getElementById('flight-chart-canvas');
     let lastHistory = null;
@@ -966,7 +981,7 @@
     function drawTimeAxis(c, t0, t1, timeScale) {
       const { ctx, fontPx, pad, pw, ph } = c;
       const xOf = t => pad.left + (t - t0) / (t1 - t0) * pw;
-      ctx.font = `${fontPx}px "Courier New", monospace`;
+      ctx.font = CHART_TICK_FONT;
       ctx.lineWidth = 1;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
@@ -1061,7 +1076,7 @@
       const ySpeed = kms => pad.top + ph - kms / speedScale.max * ph;
       const yAlt   = km  => pad.top + ph - km / altScale.max * ph;
 
-      ctx.font = `${fontPx}px "Courier New", monospace`;
+      ctx.font = CHART_TICK_FONT;
       ctx.lineWidth = 1;
 
       // Horizontal grid shared by both y axes (e.g. 600 km → 120, 240, 360, 480, 600)
@@ -1112,7 +1127,7 @@
       const yOfEcc = e  => pad.top + ph - e * ph;
 
       // Horizontal grid, labelled on both sides in the colour of that side's line
-      ctx.font = `${fontPx}px "Courier New", monospace`;
+      ctx.font = CHART_TICK_FONT;
       ctx.lineWidth = 1;
       ctx.textBaseline = 'middle';
       for (let k = 0; k <= ORBIT_Y_DIVISIONS; k++) {
