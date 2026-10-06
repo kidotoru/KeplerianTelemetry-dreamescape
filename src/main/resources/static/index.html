@@ -44,13 +44,14 @@
       --panel-border: rgba(60, 90, 130, 0.5);
     }
 
-    /* ── Data feed (bottom, between the chart and the detail panel) ── */
+    /* ── Data feed (bottom centre, between the chart and the ground track map) ──
+       Fixed height like its neighbours; the width takes whatever is left between them. */
     #data-feed {
       position: fixed;
-      left: var(--panel-gap);
-      width: var(--chart-width);
-      top: calc(var(--panel-gap) * 2 + var(--chart-width) / 2);            /* below the mission panel */
-      bottom: calc(var(--panel-gap) * 2 + var(--bottom-panel-height));    /* above the chart */
+      bottom: var(--panel-gap);
+      left: calc(var(--panel-gap) * 2 + var(--chart-width));                /* right of the chart */
+      right: calc(var(--panel-gap) * 2 + var(--bottom-panel-height) * 2);   /* left of the map */
+      height: var(--bottom-panel-height);
       border: 1px solid var(--panel-border);
       background: var(--panel-bg);
       padding: 10px 14px;
