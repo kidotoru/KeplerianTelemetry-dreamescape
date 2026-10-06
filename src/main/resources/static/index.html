@@ -82,7 +82,7 @@
       top: var(--panel-gap);
       left: var(--panel-gap);
       width: var(--chart-width);
-      height: calc(var(--chart-width) / 2);
+      bottom: calc(var(--panel-gap) * 3 + var(--bottom-panel-height) * 2);  /* above the left-middle panel; the height takes what is left */
       padding: 12px 18px;
       display: flex;
       flex-direction: column;
@@ -93,6 +93,19 @@
       height: var(--bottom-panel-height);   /* same height as the chart */
       width: calc(var(--bottom-panel-height) * 2); /* 2:1, so the map fills the panel */
     }
+    /* ── Left-middle panel (empty for now): same fixed size as the chart, directly above it ── */
+    #left-middle-panel {
+      position: fixed;
+      left: var(--panel-gap);
+      bottom: calc(var(--panel-gap) * 2 + var(--bottom-panel-height));
+      width: var(--chart-width);
+      height: var(--bottom-panel-height);
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      z-index: 11;
+      pointer-events: none;
+    }
+
     #ground-track canvas { width: 100%; height: 100%; display: block; }
 
     .mission-caption { font-size: 12px; letter-spacing: 0.12em; color: rgba(255, 255, 255, 0.6); }
@@ -247,6 +260,8 @@
   <div id="canvas-wrap"></div>
 
   <div id="flight-chart"><canvas id="flight-chart-canvas"></canvas></div>
+
+  <div id="left-middle-panel"></div>
 
   <div id="data-feed"><div id="data-feed-text"></div></div>
 
