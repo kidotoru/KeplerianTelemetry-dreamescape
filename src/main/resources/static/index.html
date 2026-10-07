@@ -170,23 +170,23 @@
     /* ── 3D body labels (rendered by CSS2DRenderer) ── */
     .body-label {
       font-family: "Courier New", monospace;
-      font-size: 11px;
+      font-size: calc(16.5 * var(--u));
       color: rgba(80,120,160,0.9);
       pointer-events: auto;
       cursor: pointer;
       white-space: nowrap;
       text-align: center;
       /* CSS2DRenderer already centers the wrapper on the point; only lift the label above the marker */
-      transform: translateY(calc(-100% - 6px));
+      transform: translateY(calc(-100% - 6 * var(--u)));
     }
 
-    .body-label.lbl-selected { color: #3ddc84; font-size: 14px; font-weight: bold; }
+    .body-label.lbl-selected { color: #3ddc84; font-size: calc(21 * var(--u)); font-weight: bold; }
 
     /* ── Body position markers (constant screen size) ──
        No transform here: CSS2DRenderer already centers the wrapper (and so this circle) on the point */
     .body-marker {
-      width: 7px;
-      height: 7px;
+      width: calc(7 * var(--u));
+      height: calc(7 * var(--u));
       border-radius: 50%;
       background: rgba(85,136,187,0.9);
       pointer-events: auto;
@@ -194,7 +194,7 @@
       box-sizing: border-box;
     }
 
-    .body-marker.marker-selected { width: 14px; height: 14px; background: #3ddc84; }
+    .body-marker.marker-selected { width: calc(14 * var(--u)); height: calc(14 * var(--u)); background: #3ddc84; }
   </style>
 </head>
 <body>
