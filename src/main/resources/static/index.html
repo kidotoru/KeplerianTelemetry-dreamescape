@@ -46,8 +46,8 @@
       z-index: 11;
       pointer-events: none;
       font-family: "Courier New", monospace;
-      font-size: 12px;
-      line-height: 16px;          /* must match DATA_FEED_LINE_HEIGHT */
+      font-size: 15px;            /* same as the flight events; lines wider than the panel are cut off */
+      line-height: 18px;          /* must match DATA_FEED_LINE_HEIGHT */
       color: rgba(255, 255, 255, 0.75);
       text-shadow: 0 0 4px rgba(0, 0, 0, 0.9);
     }
@@ -138,13 +138,15 @@
 
     /* One line of the calculation feed: exactly one row tall, so blocks stay a whole number of rows */
     .calc-row {
-      height: 16px;
+      height: 18px;
       white-space: pre;
       overflow: hidden;
       font-variant-numeric: tabular-nums;
     }
     .calc-row.calc-head    { color: #ffffff; }
-    .calc-row.calc-section { color: rgba(255, 255, 255, 0.5); }
+    .calc-row.calc-section { color: #ffffff; }                 /* section headings */
+    .calc-row.calc-note    { color: rgba(255, 255, 255, 0.5); } /* side remarks: the KSD check, waiting message */
+    .calc-row.calc-tle     { color: rgba(255, 255, 255, 0.5); }
 
 
     /* ── Flight chart (selected spacecraft: surface speed / altitude vs time) ── */
@@ -1167,16 +1169,14 @@
     // Works out the orbit of the spacecraft selected in KSD from its state vector
     // (position and velocity relative to the Earth), one step per line, the way an
     // orbit determination would: r, v → specific energy → a, h → e → Ap / Pe / period.
-    // The apoapsis and eccentricity lines use the orbit chart's colours, so the
-    // numbers can be traced to its lines. A last line checks the result against the
-    // elements KSD computed itself.
+    // A last line checks the result against the elements KSD computed itself.
     // Lines scroll upward at a steady rate; each time the lines queued below the
     // panel run low, a new block is worked out from the latest telemetry. While no
     // spacecraft orbiting the Earth is selected, the blocks go through every
     // spacecraft orbiting the Earth in turn.
     const dataFeedEl   = document.getElementById("data-feed");
     const dataFeedText = document.getElementById("data-feed-text");
-    const DATA_FEED_LINE_HEIGHT   = 16;  // px, same as the CSS row height
+    const DATA_FEED_LINE_HEIGHT   = 18;  // px, same as the CSS row height
     const DATA_FEED_LINE_INTERVAL = 0.2; // s per row (scroll speed)
     // Same gravitational constant and Earth mass as KSD, so the results match its elements
     const CALC_MU_EARTH = 6.67430e-11 * 5.972e24; // m^3/s^2
@@ -1203,10 +1203,9 @@
     const fmtFixed = (v, d) => Number.isFinite(v) ? v.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d }) : "—";
     const fmtExp   = (v, d) => Number.isFinite(v) ? v.toExponential(d) : "—";
 
-    function calcRow(text, cls, color) {
+    function calcRow(text, cls) {
       const row = document.createElement("div");
       row.className = cls ? `calc-row ${cls}` : "calc-row";
-      if (color) row.style.color = color;
       row.textContent = text;
       return row;
     }
@@ -1215,7 +1214,7 @@
       const block = document.createElement("div");
       const target = calcFeedTarget();
       if (!target) {
-        block.appendChild(calcRow("AWAITING STATE VECTOR ...", "calc-section"));
+        block.appendChild(calcRow("AWAITING STATE VECTOR ...", "calc-note"));
         return block;
       }
       const { earth, craft } = target;
@@ -1239,34 +1238,72 @@
       const rows = [
         [`== ${craft.name ?? craft.id}  ${time} UTC `.padEnd(52, "="), "calc-head"],
         ["STATE VECTOR (EARTH-CENTRED)", "calc-section"],
-        [`  rx = ${fmtFixed(rv.x, 1).padStart(17)} m`],
-        [`  ry = ${fmtFixed(rv.y, 1).padStart(17)} m`],
-        [`  rz = ${fmtFixed(rv.z, 1).padStart(17)} m`],
-        [`  vx = ${fmtFixed(vv.x, 3).padStart(17)} m/s`],
-        [`  vy = ${fmtFixed(vv.y, 3).padStart(17)} m/s`],
-        [`  vz = ${fmtFixed(vv.z, 3).padStart(17)} m/s`],
-        [`  μ  = ${fmtExp(mu, 6).padStart(17)} m³/s²`],
-        [`  R  = ${fmtFixed(R, 1).padStart(17)} m`],
+        [`rx  = ${fmtFixed(rv.x, 1).padStart(17)} m`],
+        [`ry  = ${fmtFixed(rv.y, 1).padStart(17)} m`],
+        [`rz  = ${fmtFixed(rv.z, 1).padStart(17)} m`],
+        [`vx  = ${fmtFixed(vv.x, 3).padStart(17)} m/s`],
+        [`vy  = ${fmtFixed(vv.y, 3).padStart(17)} m/s`],
+        [`vz  = ${fmtFixed(vv.z, 3).padStart(17)} m/s`],
+        [`μ   = ${fmtExp(mu, 6).padStart(17)} m³/s²`],
+        [`R   = ${fmtFixed(R, 1).padStart(17)} m`],
         ["ORBIT DETERMINATION", "calc-section"],
         [line("r",  "|r|",               fmtFixed(r, 1),   "m")],
         [line("v",  "|v|",               fmtFixed(v, 3),   "m/s")],
         [line("ε",  "v²/2 − μ/r",        fmtFixed(eps, 1), "J/kg")],
         [line("a",  "−μ / 2ε",           fmtFixed(a, 1),   "m")],
         [line("h",  "|r × v|",           fmtExp(h, 6),     "m²/s")],
-        [line("e",  "√(1 + 2εh²/μ²)",    fmtFixed(e, 6)), "", ORBIT_ECC_COLOR],
+        [line("e",  "√(1 + 2εh²/μ²)",    fmtFixed(e, 6))],
         [line("Pe", "a(1 − e) − R",      fmtFixed((rp - R) / 1000, 1), "km")],
-        [line("Ap", "a(1 + e) − R",      e < 1 ? fmtFixed((ra - R) / 1000, 1) : "∞", "km"), "", ORBIT_AP_COLOR],
+        [line("Ap", "a(1 + e) − R",      e < 1 ? fmtFixed((ra - R) / 1000, 1) : "∞", "km")],
         [line("T",  "2π √(a³/μ)",        e < 1 ? fmtFixed(period, 1) : "—", "s")],
       ];
       // KSD doesn't compute elements while the craft waits on the pad (a = 0)
       if (craft.kep?.a) {
-        rows.push([`CHECK  KSD a = ${fmtFixed(craft.kep.a, 1)} m  e = ${fmtFixed(craft.kep.e, 6)}`, "calc-section"]);
+        rows.push([`CHECK  KSD a = ${fmtFixed(craft.kep.a, 1)} m  e = ${fmtFixed(craft.kep.e, 6)}`, "calc-note"]);
+      }
+      const tle = tleLines(craft);
+      if (tle) {
+        rows.push(["TWO-LINE ELEMENTS", "calc-section"]);
+        for (const text of tle) {
+          rows.push([text, "calc-tle"]);
+        }
       }
       rows.push([""]);
-      for (const [text, cls, color] of rows) {
-        block.appendChild(calcRow(text, cls, color));
+      for (const [text, cls] of rows) {
+        block.appendChild(calcRow(text, cls));
       }
       return block;
+    }
+
+    // NORAD two-line element set built from the elements KSD computed (kep). Fields KSD
+    // has no counterpart for (drag terms, launch designator, element set number) are
+    // filled with plausible fixed values. null while KSD hasn't computed elements (on
+    // the pad) or for an escape trajectory, which a TLE can't describe.
+    function tleLines(craft) {
+      const k = craft.kep;
+      if (!k?.a || !(k.e >= 0 && k.e < 1) || k.ep == null) return null;
+      const deg = v => ((v % 360) + 360) % 360;
+      const num = (v, w, d) => v.toFixed(d).padStart(w);
+      // Modulo-10 checksum: digits count as their value, '-' as 1
+      const checksum = line => [...line].reduce((sum, ch) => sum + (ch === "-" ? 1 : (ch >= "0" && ch <= "9" ? Number(ch) : 0)), 0) % 10;
+
+      const satNum = String(craft.id % 100000).padStart(5, "0");
+      const epoch = new Date(k.ep * 1000);
+      const yearStart = Date.UTC(epoch.getUTCFullYear(), 0, 1);
+      const yy = String(epoch.getUTCFullYear() % 100).padStart(2, "0");
+      const dayOfYear = (k.ep * 1000 - yearStart) / 86400000 + 1;
+      const epochField = yy + dayOfYear.toFixed(8).padStart(12, "0");   // YYDDD.DDDDDDDD
+      const intlDesignator = `${yy}${String(craft.id % 1000).padStart(3, "0")}A`.padEnd(8);
+      const meanMotion = Math.sqrt(CALC_MU_EARTH / (k.a * k.a * k.a)) * 86400 / (2 * Math.PI); // rev/day
+      // Revolutions since launch, known only for the spacecraft selected in KSD
+      const revs = (lastMission?.id === craft.id && calcFeedData?.currentTime != null)
+        ? Math.max(0, Math.floor((calcFeedData.currentTime - lastMission.launchTime) * meanMotion / 86400)) % 100000
+        : 0;
+
+      const l1 = `1 ${satNum}U ${intlDesignator} ${epochField}  .00000000  00000-0  00000-0 0  999`;
+      const l2 = `2 ${satNum} ${num(deg(k.i), 8, 4)} ${num(deg(k.raan), 8, 4)} ${k.e.toFixed(7).slice(2)} `
+               + `${num(deg(k.argp), 8, 4)} ${num(deg(k.ma), 8, 4)} ${num(meanMotion, 11, 8)}${String(revs).padStart(5)}`;
+      return [String(craft.name ?? craft.id), l1 + checksum(l1), l2 + checksum(l2)];
     }
 
     function stepDataFeed(dt) {
