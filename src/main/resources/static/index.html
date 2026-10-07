@@ -136,18 +136,15 @@
       to   { background: transparent; }
     }
 
-    /* One row per object. Fixed column widths keep the columns aligned on every row
-       (full-width characters in names don't render exactly 2 half-width columns wide,
-       so padding with spaces alone wouldn't line up). */
-    .feed-row {
-      display: grid;
-      grid-template-columns: 30ch 20ch 16ch 16ch; /* name | "VEL X=" + 10 + " m/s" | "Y=" + 10 + " m/s" | "Z=" ... */
-      column-gap: 1ch;
-      height: 16px;               /* exactly one line, so chunks stay a whole number of lines */
+    /* One line of the calculation feed: exactly one row tall, so blocks stay a whole number of rows */
+    .calc-row {
+      height: 16px;
       white-space: pre;
       overflow: hidden;
+      font-variant-numeric: tabular-nums;
     }
-    .feed-row > span { overflow: hidden; }
+    .calc-row.calc-head    { color: #ffffff; }
+    .calc-row.calc-section { color: rgba(255, 255, 255, 0.5); }
 
 
     /* ── Flight chart (selected spacecraft: surface speed / altitude vs time) ── */
@@ -1166,71 +1163,117 @@
       drawOrbitChart();
     }
 
-    // ── Data feed (purely decorative) ────────────────────────────────────────
-    // Every object's name and velocity, one object per row
-    // ("VEL X=  7612.345 m/s Y= ..."), scrolling smoothly upward at a steady rate. Each time the rows queued below the panel run low, the latest
-    // response is appended as a block; blocks scrolled out of view are dropped.
-    // Velocity is in m/s, as received.
+    // ── Calculation feed (bottom centre) ─────────────────────────────────────
+    // Works out the orbit of the spacecraft selected in KSD from its state vector
+    // (position and velocity relative to the Earth), one step per line, the way an
+    // orbit determination would: r, v → specific energy → a, h → e → Ap / Pe / period.
+    // The apoapsis and eccentricity lines use the orbit chart's colours, so the
+    // numbers can be traced to its lines. A last line checks the result against the
+    // elements KSD computed itself.
+    // Lines scroll upward at a steady rate; each time the lines queued below the
+    // panel run low, a new block is worked out from the latest telemetry. While no
+    // spacecraft orbiting the Earth is selected, the blocks go through every
+    // spacecraft orbiting the Earth in turn.
     const dataFeedEl   = document.getElementById("data-feed");
     const dataFeedText = document.getElementById("data-feed-text");
     const DATA_FEED_LINE_HEIGHT   = 16;  // px, same as the CSS row height
     const DATA_FEED_LINE_INTERVAL = 0.2; // s per row (scroll speed)
-    const DATA_FEED_NAME_WIDTH    = 30;  // half-width columns; full-width characters count as 2
-    let latestFeedObjects = null;
+    // Same gravitational constant and Earth mass as KSD, so the results match its elements
+    const CALC_MU_EARTH = 6.67430e-11 * 5.972e24; // m^3/s^2
+    let calcFeedData  = null;            // latest /api/objects response
+    let calcFeedCycle = 0;               // next spacecraft to show while none is selected
     let dataFeedOffset = 0;              // px scrolled past the top of the first block
 
-    // Fixed to the ground, so their velocity never leaves 0
-    const DATA_FEED_GROUND_TYPES = new Set(['ground', 'spacecenter']);
-
     function showDataFeed(data) {
-      latestFeedObjects = (data.objects ?? [])
-        .filter(o => !DATA_FEED_GROUND_TYPES.has((o.type ?? "").trim().toLowerCase()))
-        .sort((a, b) => a.id - b.id);
+      calcFeedData = data;
     }
 
-    // Cut a name to DATA_FEED_NAME_WIDTH half-width columns (full-width characters take 2)
-    function fitName(name) {
-      let width = 0, out = "";
-      for (const ch of name) {
-        const w = /[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6]/.test(ch) ? 2 : 1;
-        if (width + w > DATA_FEED_NAME_WIDTH) break;
-        width += w;
-        out += ch;
-      }
-      return out;
+    // The KSD-selected spacecraft if it orbits the Earth, otherwise the next one in turn
+    function calcFeedTarget() {
+      const objs = calcFeedData?.objects ?? [];
+      const earth = objs.find(o => o.id === EARTH_ID);
+      if (!earth?.cart?.pos) return null;
+      const candidates = objs.filter(o => o.parentId === EARTH_ID && (o.type ?? "").trim().toLowerCase() === "spacecraft" && o.cart?.pos && o.cart?.vel);
+      const selected = candidates.find(o => o.id === lastMission?.id);
+      if (selected) return { earth, craft: selected };
+      if (!candidates.length) return null;
+      return { earth, craft: candidates[calcFeedCycle++ % candidates.length] };
     }
 
-    function feedRow(cells) {
+    const fmtFixed = (v, d) => Number.isFinite(v) ? v.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d }) : "—";
+    const fmtExp   = (v, d) => Number.isFinite(v) ? v.toExponential(d) : "—";
+
+    function calcRow(text, cls, color) {
       const row = document.createElement("div");
-      row.className = "feed-row";
-      for (const text of cells) {
-        const cell = document.createElement("span");
-        cell.textContent = text;
-        row.appendChild(cell);
-      }
+      row.className = cls ? `calc-row ${cls}` : "calc-row";
+      if (color) row.style.color = color;
+      row.textContent = text;
       return row;
     }
 
-    function feedBlock(objects) {
+    function feedBlock() {
       const block = document.createElement("div");
-      // Value right-aligned in a fixed number of columns after its label (all ASCII, so padding lines up)
-      const field = (label, v) =>
-        `${label}=${((v == null || !Number.isFinite(v)) ? "-" : v.toFixed(3)).padStart(10)} m/s`;
-      for (const o of objects) {
-        const v = o.cart?.vel;
-        block.appendChild(feedRow([
-          fitName(o.name ?? String(o.id)),
-          field("VEL X", v?.x), field("Y", v?.y), field("Z", v?.z),
-        ]));
+      const target = calcFeedTarget();
+      if (!target) {
+        block.appendChild(calcRow("AWAITING STATE VECTOR ...", "calc-section"));
+        return block;
+      }
+      const { earth, craft } = target;
+      const mu = CALC_MU_EARTH;
+      const R  = earth.radius ?? earthRadius;
+      const rv = { x: craft.cart.pos.x - earth.cart.pos.x, y: craft.cart.pos.y - earth.cart.pos.y, z: craft.cart.pos.z - earth.cart.pos.z };
+      const vv = craft.cart.vel;   // already relative to the Earth
+      const r = Math.hypot(rv.x, rv.y, rv.z);
+      const v = Math.hypot(vv.x, vv.y, vv.z);
+      const eps = v * v / 2 - mu / r;
+      const a = -mu / (2 * eps);
+      const h = Math.hypot(rv.y * vv.z - rv.z * vv.y, rv.z * vv.x - rv.x * vv.z, rv.x * vv.y - rv.y * vv.x);
+      const e = Math.sqrt(Math.max(0, 1 + 2 * eps * h * h / (mu * mu)));
+      const rp = Math.abs(a) * Math.abs(1 - e);
+      const ra = e < 1 ? a * (1 + e) : Infinity;
+      const period = e < 1 ? 2 * Math.PI * Math.sqrt(a * a * a / mu) : NaN;
+
+      // label = formula = value unit
+      const line = (label, formula, value, unit = "") => `${label.padEnd(4)}= ${formula.padEnd(18)}= ${value.padStart(16)} ${unit}`;
+      const time = calcFeedData.currentTime != null ? new Date(calcFeedData.currentTime * 1000).toISOString().slice(0, 19).replace("T", " ") : "";
+      const rows = [
+        [`== ${craft.name ?? craft.id}  ${time} UTC `.padEnd(52, "="), "calc-head"],
+        ["STATE VECTOR (EARTH-CENTRED)", "calc-section"],
+        [`  rx = ${fmtFixed(rv.x, 1).padStart(17)} m`],
+        [`  ry = ${fmtFixed(rv.y, 1).padStart(17)} m`],
+        [`  rz = ${fmtFixed(rv.z, 1).padStart(17)} m`],
+        [`  vx = ${fmtFixed(vv.x, 3).padStart(17)} m/s`],
+        [`  vy = ${fmtFixed(vv.y, 3).padStart(17)} m/s`],
+        [`  vz = ${fmtFixed(vv.z, 3).padStart(17)} m/s`],
+        [`  μ  = ${fmtExp(mu, 6).padStart(17)} m³/s²`],
+        [`  R  = ${fmtFixed(R, 1).padStart(17)} m`],
+        ["ORBIT DETERMINATION", "calc-section"],
+        [line("r",  "|r|",               fmtFixed(r, 1),   "m")],
+        [line("v",  "|v|",               fmtFixed(v, 3),   "m/s")],
+        [line("ε",  "v²/2 − μ/r",        fmtFixed(eps, 1), "J/kg")],
+        [line("a",  "−μ / 2ε",           fmtFixed(a, 1),   "m")],
+        [line("h",  "|r × v|",           fmtExp(h, 6),     "m²/s")],
+        [line("e",  "√(1 + 2εh²/μ²)",    fmtFixed(e, 6)), "", ORBIT_ECC_COLOR],
+        [line("Pe", "a(1 − e) − R",      fmtFixed((rp - R) / 1000, 1), "km")],
+        [line("Ap", "a(1 + e) − R",      e < 1 ? fmtFixed((ra - R) / 1000, 1) : "∞", "km"), "", ORBIT_AP_COLOR],
+        [line("T",  "2π √(a³/μ)",        e < 1 ? fmtFixed(period, 1) : "—", "s")],
+      ];
+      // KSD doesn't compute elements while the craft waits on the pad (a = 0)
+      if (craft.kep?.a) {
+        rows.push([`CHECK  KSD a = ${fmtFixed(craft.kep.a, 1)} m  e = ${fmtFixed(craft.kep.e, 6)}`, "calc-section"]);
+      }
+      rows.push([""]);
+      for (const [text, cls, color] of rows) {
+        block.appendChild(calcRow(text, cls, color));
       }
       return block;
     }
 
     function stepDataFeed(dt) {
-      if (!latestFeedObjects) return;
+      if (!calcFeedData) return;
       // Keep at least two panel-heights of rows queued below the visible area
       for (let i = 0; i < 50 && dataFeedText.offsetHeight - dataFeedOffset < dataFeedEl.clientHeight * 2; i++) {
-        dataFeedText.appendChild(feedBlock(latestFeedObjects));
+        dataFeedText.appendChild(feedBlock());
       }
       dataFeedOffset += DATA_FEED_LINE_HEIGHT / DATA_FEED_LINE_INTERVAL * dt;
       // Drop chunks that have scrolled completely out of view
