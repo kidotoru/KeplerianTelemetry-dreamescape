@@ -32,6 +32,7 @@
       --chart-width: calc(680 * var(--u));
       --bottom-panel-height: calc(var(--chart-width) * 3 / 5); /* the chart is 5:3 */
       --panel-gap: calc(12 * var(--u));
+      --spare-panel-height: calc(252 * var(--u)); /* the empty panel between the event log and the orbit chart */
       --panel-bg: rgba(28, 44, 68, 0.4);      /* shared by every panel */
       --panel-border: rgba(60, 90, 130, 0.5);
     }
@@ -74,7 +75,7 @@
       top: var(--panel-gap);
       left: var(--panel-gap);
       width: var(--chart-width);
-      bottom: calc(var(--panel-gap) * 3 + var(--bottom-panel-height) * 2);  /* above the left-middle panel; the height takes what is left */
+      bottom: calc(var(--panel-gap) * 4 + var(--bottom-panel-height) * 2 + var(--spare-panel-height));  /* above the spare panel; the height takes what is left */
       padding: calc(12 * var(--u)) calc(18 * var(--u));
       display: flex;
       flex-direction: column;
@@ -92,6 +93,19 @@
       bottom: calc(var(--panel-gap) * 2 + var(--bottom-panel-height));
       width: var(--chart-width);
       height: var(--bottom-panel-height);
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      z-index: 11;
+      pointer-events: none;
+    }
+
+    /* ── Spare panel (left, between the event log and the orbit chart): empty for now ── */
+    #spare-panel {
+      position: fixed;
+      left: var(--panel-gap);
+      bottom: calc(var(--panel-gap) * 3 + var(--bottom-panel-height) * 2);
+      width: var(--chart-width);
+      height: var(--spare-panel-height);
       background: var(--panel-bg);
       border: 1px solid var(--panel-border);
       z-index: 11;
@@ -202,6 +216,8 @@
   <div id="canvas-wrap"></div>
 
   <div id="flight-chart"><canvas id="flight-chart-canvas"></canvas></div>
+
+  <div id="spare-panel"></div>
 
   <div id="orbit-chart"><canvas id="orbit-chart-canvas"></canvas></div>
 
