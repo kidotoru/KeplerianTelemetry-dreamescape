@@ -32,7 +32,7 @@
       --chart-width: calc(680 * var(--u));
       --bottom-panel-height: calc(var(--chart-width) * 3 / 5); /* the chart is 5:3 */
       --panel-gap: calc(12 * var(--u));
-      --spare-panel-height: calc(252 * var(--u)); /* the empty panel between the event log and the orbit chart */
+      --stations-panel-height: calc(252 * var(--u)); /* the ground station panel between the event log and the orbit chart */
       --panel-bg: rgba(28, 44, 68, 0.4);      /* shared by every panel */
       --panel-border: rgba(60, 90, 130, 0.5);
     }
@@ -75,7 +75,7 @@
       top: var(--panel-gap);
       left: var(--panel-gap);
       width: var(--chart-width);
-      bottom: calc(var(--panel-gap) * 4 + var(--bottom-panel-height) * 2 + var(--spare-panel-height));  /* above the spare panel; the height takes what is left */
+      bottom: calc(var(--panel-gap) * 4 + var(--bottom-panel-height) * 2 + var(--stations-panel-height));  /* above the ground stations; the height takes what is left */
       padding: calc(12 * var(--u)) calc(18 * var(--u));
       display: flex;
       flex-direction: column;
@@ -99,18 +99,47 @@
       pointer-events: none;
     }
 
-    /* ── Spare panel (left, between the event log and the orbit chart): empty for now ── */
-    #spare-panel {
+    /* ── Ground stations (left, between the event log and the orbit chart) ── */
+    #stations-panel {
       position: fixed;
       left: var(--panel-gap);
       bottom: calc(var(--panel-gap) * 3 + var(--bottom-panel-height) * 2);
       width: var(--chart-width);
-      height: var(--spare-panel-height);
+      height: var(--stations-panel-height);
       background: var(--panel-bg);
       border: 1px solid var(--panel-border);
       z-index: 11;
       pointer-events: none;
+      padding: calc(12 * var(--u)) calc(18 * var(--u));
+      display: flex;
+      flex-direction: column;
+      font-family: "Courier New", monospace;
+      color: #ffffff;
+      text-shadow: 0 0 4px rgba(0, 0, 0, 0.9);
     }
+    #stations-list {
+      flex: 1;
+      overflow: hidden;
+      border-top: 1px solid var(--panel-border);
+    }
+    #stations-list-text { will-change: transform; }
+    /* One row per station: exactly one row tall, so blocks stay a whole number of rows */
+    .station-row {
+      display: grid;
+      grid-template-columns: 34ch 8ch 11ch 5ch; /* name | elevation | slant range | AOS/LOS */
+      column-gap: 1ch;
+      font-size: calc(15 * var(--u));
+      line-height: calc(22 * var(--u));
+      height: calc(22 * var(--u));
+      white-space: pre;
+      overflow: hidden;
+      color: rgba(255, 255, 255, 0.5);   /* out of sight (LOS) */
+    }
+    .station-row > span { overflow: hidden; }
+    .station-row > span:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+    .station-row.station-aos { color: #ffffff; }
+    .station-row.station-head { color: rgba(255, 255, 255, 0.6); }   /* same font as the rows, so the ch columns line up */
+    .station-row.station-head > span:not(:first-child) { text-align: center; }
 
     /* ── Logo (top right) ── */
     #logo {
@@ -217,7 +246,11 @@
 
   <div id="flight-chart"><canvas id="flight-chart-canvas"></canvas></div>
 
-  <div id="spare-panel"></div>
+  <div id="stations-panel">
+    <div class="mission-caption" id="stations-caption">GROUND STATIONS</div>
+    <div class="station-row station-head"><span>STATION</span><span>EL</span><span>RANGE</span><span>LINK</span></div>
+    <div id="stations-list"><div id="stations-list-text"></div></div>
+  </div>
 
   <div id="orbit-chart"><canvas id="orbit-chart-canvas"></canvas></div>
 
@@ -885,6 +918,7 @@
       stepLaunchPitch(dt);
       stepOrbitPull(dt);
       stepDataFeed(dt);
+      stepStations(dt);
       controls.update();
       updateOcclusion();
       renderer.render(scene, camera);
@@ -933,6 +967,7 @@
       updateScene();
       updateLaunchCamera(data.selectedInOrbit);
       updateMissionPanel(data);
+      showStations(data);   // after updateMissionPanel, which picks the spacecraft
       drawGroundTrack();
     }
 
@@ -1356,6 +1391,110 @@
         first = dataFeedText.firstElementChild;
       }
       dataFeedText.style.transform = `translateY(${-dataFeedOffset}px)`;
+    }
+
+    // ── Ground stations (left, below the event log) ───────────────────────────
+    // The launch sites stand in for ground stations: for the spacecraft selected in KSD,
+    // each site's elevation angle to the craft (above the local horizon), the slant range,
+    // and AOS (acquisition of signal) once the craft is STATION_MIN_ELEVATION above the
+    // horizon, LOS otherwise.
+    // The list scrolls upward in a loop. Each pass is sorted by elevation, so the stations
+    // in contact come first; the rows already on screen keep updating every poll.
+    const stationsCaptionEl  = document.getElementById("stations-caption");
+    const stationsListEl     = document.getElementById("stations-list");
+    const stationsListText   = document.getElementById("stations-list-text");
+    const STATION_TYPES          = new Set(["spacecenter"]);
+    const STATION_MIN_ELEVATION  = 5;    // deg; the usual antenna mask
+    const STATION_LINE_INTERVAL  = 0.4;  // s per row (scroll speed)
+    const STATION_NAME_WIDTH     = 34;   // columns, same as the CSS
+    let stationsData   = null;           // latest /api/objects response
+    let stationsOffset = 0;              // px scrolled past the top of the first block
+
+    // The KSD-selected spacecraft if it orbits the Earth, with the Earth and the stations
+    function stationsContext() {
+      const objs = stationsData?.objects ?? [];
+      const earth = objs.find(o => o.id === EARTH_ID);
+      const craft = objs.find(o => o.id === lastMission?.id && o.parentId === EARTH_ID && o.cart?.pos);
+      const stations = objs.filter(o => o.parentId === EARTH_ID && STATION_TYPES.has((o.type ?? "").trim().toLowerCase()) && o.cart?.pos);
+      return earth?.cart?.pos && craft ? { earth, craft, stations } : null;
+    }
+
+    // Elevation (deg) and slant range (m) of the craft seen from a station
+    function stationLook(station, craft, earth) {
+      const up = { x: station.cart.pos.x - earth.cart.pos.x, y: station.cart.pos.y - earth.cart.pos.y, z: station.cart.pos.z - earth.cart.pos.z };
+      const los = { x: craft.cart.pos.x - station.cart.pos.x, y: craft.cart.pos.y - station.cart.pos.y, z: craft.cart.pos.z - station.cart.pos.z };
+      const range = Math.hypot(los.x, los.y, los.z);
+      const upLen = Math.hypot(up.x, up.y, up.z);
+      const sinEl = range > 0 && upLen > 0 ? (los.x * up.x + los.y * up.y + los.z * up.z) / (range * upLen) : 1;
+      return { elevation: Math.asin(Math.max(-1, Math.min(1, sinEl))) * 180 / Math.PI, range };
+    }
+
+    function stationCells(row, look) {
+      const aos = look.elevation >= STATION_MIN_ELEVATION;
+      row.classList.toggle("station-aos", aos);
+      const [, el, range, status] = row.children;
+      el.textContent = `${look.elevation >= 0 ? "+" : ""}${look.elevation.toFixed(1)}°`;
+      range.textContent = `${fmtFixed(look.range / 1000, 0)} km`;
+      status.textContent = aos ? "AOS" : "LOS";
+    }
+
+    function stationRow(station) {
+      const row = document.createElement("div");
+      row.className = "station-row";
+      row.dataset.station = station.id;
+      for (let i = 0; i < 4; i++) {
+        row.appendChild(document.createElement("span"));
+      }
+      row.firstChild.textContent = String(station.name ?? station.id).slice(0, STATION_NAME_WIDTH);
+      return row;
+    }
+
+    // One pass over every station, sorted by elevation (highest first)
+    function stationsBlock(ctx) {
+      const block = document.createElement("div");
+      const looks = ctx.stations
+        .map(st => ({ st, look: stationLook(st, ctx.craft, ctx.earth) }))
+        .sort((a, b) => b.look.elevation - a.look.elevation);
+      for (const { st, look } of looks) {
+        const row = stationRow(st);
+        stationCells(row, look);
+        block.appendChild(row);
+      }
+      return block;
+    }
+
+    function showStations(data) {
+      stationsData = data;
+      const ctx = stationsContext();
+      stationsCaptionEl.textContent = ctx ? `GROUND STATIONS — ${ctx.craft.name ?? ctx.craft.id}` : "GROUND STATIONS";
+      if (!ctx) {
+        stationsListText.replaceChildren();
+        stationsOffset = 0;
+        return;
+      }
+      // Rows already queued show the latest values
+      const byId = Object.fromEntries(ctx.stations.map(st => [st.id, st]));
+      for (const row of stationsListText.querySelectorAll(".station-row")) {
+        const st = byId[row.dataset.station];
+        if (st) stationCells(row, stationLook(st, ctx.craft, ctx.earth));
+      }
+    }
+
+    function stepStations(dt) {
+      const ctx = stationsContext();
+      if (!ctx || !ctx.stations.length) return;
+      // Keep at least two panel-heights of rows queued below the visible area
+      for (let i = 0; i < 20 && stationsListText.offsetHeight - stationsOffset < stationsListEl.clientHeight * 2; i++) {
+        stationsListText.appendChild(stationsBlock(ctx));
+      }
+      stationsOffset += 22 * hudScale() / STATION_LINE_INTERVAL * dt;   // 22: the CSS row height
+      let first = stationsListText.firstElementChild;
+      while (first && stationsListText.childElementCount > 1 && first.getBoundingClientRect().height <= stationsOffset) {
+        stationsOffset -= first.getBoundingClientRect().height;
+        first.remove();
+        first = stationsListText.firstElementChild;
+      }
+      stationsListText.style.transform = `translateY(${-stationsOffset}px)`;
     }
 
     // ── Mission clock + flight event log (top left) ───────────────────────────
