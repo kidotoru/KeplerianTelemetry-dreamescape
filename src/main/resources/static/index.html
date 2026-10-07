@@ -23,10 +23,15 @@
       z-index: 0;
     }
 
+    /* The HUD is laid out for WQHD (2560×1440) and scaled as a whole to the screen:
+       sizes are written as reference pixels × --u, so every panel, font and gap keeps the
+       same share of the screen at any resolution (FHD gets exactly 75%). On a screen that
+       isn't 16:9 the smaller of the two ratios is used, so everything still fits. */
     :root {
-      --chart-width: min(42vw, 680px);
+      --u: min(100vw / 2560, 100vh / 1440);
+      --chart-width: calc(680 * var(--u));
       --bottom-panel-height: calc(var(--chart-width) * 3 / 5); /* the chart is 5:3 */
-      --panel-gap: 12px;
+      --panel-gap: calc(12 * var(--u));
       --panel-bg: rgba(28, 44, 68, 0.4);      /* shared by every panel */
       --panel-border: rgba(60, 90, 130, 0.5);
     }
@@ -41,13 +46,13 @@
       height: var(--bottom-panel-height);
       border: 1px solid var(--panel-border);
       background: var(--panel-bg);
-      padding: 10px 14px;
+      padding: calc(10 * var(--u)) calc(14 * var(--u));
       overflow: hidden;
       z-index: 11;
       pointer-events: none;
       font-family: "Courier New", monospace;
-      font-size: 15px;            /* same as the flight events; lines wider than the panel are cut off */
-      line-height: 18px;          /* must match DATA_FEED_LINE_HEIGHT */
+      font-size: calc(15 * var(--u));         /* same as the flight events; lines wider than the panel are cut off */
+      line-height: calc(18 * var(--u));       /* same as .calc-row */
       color: rgba(255, 255, 255, 0.75);
       text-shadow: 0 0 4px rgba(0, 0, 0, 0.9);
     }
@@ -70,7 +75,7 @@
       left: var(--panel-gap);
       width: var(--chart-width);
       bottom: calc(var(--panel-gap) * 3 + var(--bottom-panel-height) * 2);  /* above the left-middle panel; the height takes what is left */
-      padding: 12px 18px;
+      padding: calc(12 * var(--u)) calc(18 * var(--u));
       display: flex;
       flex-direction: column;
     }
@@ -93,13 +98,12 @@
       pointer-events: none;
     }
 
-    /* ── Logo (top right). Sized and placed in viewport units so it takes the same
-       share of the screen at any resolution ── */
+    /* ── Logo (top right) ── */
     #logo {
       position: fixed;
-      top: 1.2vw;
-      right: 1.2vw;
-      width: 20vw;               /* height follows the image's aspect */
+      top: calc(31 * var(--u));
+      right: calc(31 * var(--u));
+      width: calc(512 * var(--u));          /* height follows the image's aspect */
       height: auto;
       z-index: 11;
       pointer-events: none;
@@ -109,8 +113,8 @@
 
     #ground-track canvas { width: 100%; height: 100%; display: block; }
 
-    .mission-caption { font-size: 12px; letter-spacing: 0.12em; color: rgba(255, 255, 255, 0.6); }
-    #met { font-size: 44px; letter-spacing: 0.06em; margin: 2px 0 8px; font-variant-numeric: tabular-nums; }
+    .mission-caption { font-size: calc(12 * var(--u)); letter-spacing: 0.12em; color: rgba(255, 255, 255, 0.6); }
+    #met { font-size: calc(44 * var(--u)); letter-spacing: 0.06em; margin: calc(2 * var(--u)) 0 calc(8 * var(--u)); font-variant-numeric: tabular-nums; }
     #event-log {
       flex: 1;
       overflow: hidden;
@@ -118,14 +122,14 @@
       flex-direction: column;
       justify-content: flex-start; /* filled from the top, one row per event */
       border-top: 1px solid var(--panel-border);
-      padding-top: 6px;
+      padding-top: calc(6 * var(--u));
     }
     .event-row {
       display: grid;
       grid-template-columns: 11ch 20ch 16ch 16ch; /* time | event | "ALT  12345.6 km" | "VEL 12.34 km/s" */
       column-gap: 1ch;
-      font-size: 15px;
-      line-height: 22px;
+      font-size: calc(15 * var(--u));
+      line-height: calc(22 * var(--u));
       white-space: pre;
     }
     .event-row .ev-num { color: rgba(255, 255, 255, 0.8); }
@@ -137,7 +141,7 @@
 
     /* One line of the calculation feed: exactly one row tall, so blocks stay a whole number of rows */
     .calc-row {
-      height: 18px;
+      height: calc(18 * var(--u));
       white-space: pre;
       overflow: hidden;
       font-variant-numeric: tabular-nums;
@@ -151,8 +155,8 @@
     /* ── Flight chart (selected spacecraft: surface speed / altitude vs time) ── */
     #flight-chart {
       position: fixed;
-      bottom: 12px;
-      left: 12px;
+      bottom: var(--panel-gap);
+      left: var(--panel-gap);
       width: var(--chart-width);
       height: var(--bottom-panel-height);
       background: var(--panel-bg);
@@ -939,7 +943,14 @@
     const CHART_ALT_COLOR     = '#ff9f43'; // orange
     const CHART_AXIS_COLOR    = 'rgba(200, 216, 240, 0.85)';
     const CHART_GRID_COLOR    = 'rgba(200, 216, 240, 0.12)';
-    const CHART_TICK_FONT     = '15px "Courier New", monospace'; // tick numbers: same size as the flight events (.event-row)
+    // Same scale as the CSS --u: 1 at WQHD (2560×1440), the layout's reference resolution
+    function hudScale() {
+      return Math.min(window.innerWidth / 2560, window.innerHeight / 1440);
+    }
+    // Tick numbers: same size as the flight events (.event-row)
+    function chartTickFont() {
+      return `${15 * hudScale()}px "Courier New", monospace`;
+    }
     const flightChartEl     = document.getElementById('flight-chart');
     const flightChartCanvas = document.getElementById('flight-chart-canvas');
     let lastHistory = null;
@@ -978,7 +989,7 @@
     function drawTimeAxis(c, t0, t1, timeScale) {
       const { ctx, fontPx, pad, pw, ph } = c;
       const xOf = t => pad.left + (t - t0) / (t1 - t0) * pw;
-      ctx.font = CHART_TICK_FONT;
+      ctx.font = chartTickFont();
       ctx.lineWidth = 1;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
@@ -1087,7 +1098,7 @@
       const ySpeed = kms => pad.top + ph - kms / speedScale.max * ph;
       const yAlt   = km  => pad.top + ph - km / altScale.max * ph;
 
-      ctx.font = CHART_TICK_FONT;
+      ctx.font = chartTickFont();
       ctx.lineWidth = 1;
 
       // Horizontal grid shared by both y axes (e.g. 600 km → 120, 240, 360, 480, 600)
@@ -1136,7 +1147,7 @@
       const yOfEcc = e  => pad.top + ph - e * ph;
 
       // Horizontal grid, labelled on both sides in the colour of that side's line
-      ctx.font = CHART_TICK_FONT;
+      ctx.font = chartTickFont();
       ctx.lineWidth = 1;
       ctx.textBaseline = 'middle';
       for (let k = 0; k <= ORBIT_Y_DIVISIONS; k++) {
@@ -1184,7 +1195,6 @@
     // spacecraft orbiting the Earth in turn.
     const dataFeedEl   = document.getElementById("data-feed");
     const dataFeedText = document.getElementById("data-feed-text");
-    const DATA_FEED_LINE_HEIGHT   = 18;  // px, same as the CSS row height
     const DATA_FEED_LINE_INTERVAL = 0.2; // s per row (scroll speed)
     // Same gravitational constant and Earth mass as KSD, so the results match its elements
     const CALC_MU_EARTH = 6.67430e-11 * 5.972e24; // m^3/s^2
@@ -1320,11 +1330,12 @@
       for (let i = 0; i < 50 && dataFeedText.offsetHeight - dataFeedOffset < dataFeedEl.clientHeight * 2; i++) {
         dataFeedText.appendChild(feedBlock());
       }
-      dataFeedOffset += DATA_FEED_LINE_HEIGHT / DATA_FEED_LINE_INTERVAL * dt;
+      const lineHeight = 18 * hudScale();   // same as the CSS .calc-row height
+      dataFeedOffset += lineHeight / DATA_FEED_LINE_INTERVAL * dt;
       // Drop chunks that have scrolled completely out of view
       let first = dataFeedText.firstElementChild;
-      while (first && dataFeedText.childElementCount > 1 && first.offsetHeight <= dataFeedOffset) {
-        dataFeedOffset -= first.offsetHeight;
+      while (first && dataFeedText.childElementCount > 1 && first.getBoundingClientRect().height <= dataFeedOffset) {
+        dataFeedOffset -= first.getBoundingClientRect().height;
         first.remove();
         first = dataFeedText.firstElementChild;
       }
@@ -1405,7 +1416,7 @@
     function scrollEventLog() {
       const rows = [...eventLogEl.children];
       for (const row of rows) row.style.display = "";
-      const rowHeight = rows[0]?.offsetHeight;
+      const rowHeight = rows[0]?.getBoundingClientRect().height;
       if (!rowHeight) return;
       const style = getComputedStyle(eventLogEl);
       const room = eventLogEl.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
@@ -1482,6 +1493,7 @@
       // The map keeps its 2:1 aspect, centred in the panel
       const mw = Math.min(w, h * 2), mh = mw / 2;
       const ox = (w - mw) / 2, oy = (h - mh) / 2;
+      const k = hudScale();   // sizes below are for WQHD
       const X = lon => ox + (lon + 180) / 360 * mw;
       const Y = lat => oy + (90 - lat) / 180 * mh;
 
@@ -1534,10 +1546,10 @@
         const [lat, lon] = latLonOf(rel, o);
         if (HIDDEN_TYPES.has((obj.type ?? "").trim().toLowerCase())) {
           ctx.fillStyle = "rgba(255, 210, 120, 0.85)";
-          ctx.fillRect(X(lon) - 2, Y(lat) - 2, 4, 4);
+          ctx.fillRect(X(lon) - 2 * k, Y(lat) - 2 * k, 4 * k, 4 * k);
         } else {
           ctx.fillStyle = "rgba(85, 136, 187, 0.9)";
-          ctx.beginPath(); ctx.arc(X(lon), Y(lat), 2, 0, 2 * Math.PI); ctx.fill();
+          ctx.beginPath(); ctx.arc(X(lon), Y(lat), 2 * k, 0, 2 * Math.PI); ctx.fill();
         }
       }
 
@@ -1561,17 +1573,17 @@
       polyline(groundTrackHistory.points);
 
       ctx.fillStyle = "#3ddc84";
-      ctx.beginPath(); ctx.arc(X(now[1]), Y(now[0]), 5, 0, 2 * Math.PI); ctx.fill();
+      ctx.beginPath(); ctx.arc(X(now[1]), Y(now[0]), 5 * k, 0, 2 * Math.PI); ctx.fill();
 
       // Read-out
       const alt = (Math.hypot(rel.x, rel.y, rel.z) - earthRadius) / 1000;
       const fmtLat = v => `${Math.abs(v).toFixed(2)}°${v >= 0 ? "N" : "S"}`;
       const fmtLon = v => `${Math.abs(v).toFixed(2)}°${v >= 0 ? "E" : "W"}`;
-      ctx.font = `13px "Courier New", monospace`;
+      ctx.font = `${13 * k}px "Courier New", monospace`;
       ctx.fillStyle = "#ffffff";
       ctx.shadowColor = "rgba(0, 0, 0, 0.9)"; ctx.shadowBlur = 4;
-      ctx.fillText("GROUND TRACK", ox + 10, oy + 18);
-      ctx.fillText(`LAT ${fmtLat(now[0])}  LON ${fmtLon(now[1])}  ALT ${alt.toFixed(1)} km`, ox + 10, oy + mh - 10);
+      ctx.fillText("GROUND TRACK", ox + 10 * k, oy + 18 * k);
+      ctx.fillText(`LAT ${fmtLat(now[0])}  LON ${fmtLon(now[1])}  ALT ${alt.toFixed(1)} km`, ox + 10 * k, oy + mh - 10 * k);
       ctx.shadowBlur = 0;
     }
 
