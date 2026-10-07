@@ -122,7 +122,7 @@
     }
     .event-row {
       display: grid;
-      grid-template-columns: 12ch 20ch 16ch 16ch; /* time | event | "ALT  12345.6 km" | "VEL 12.34 km/s" */
+      grid-template-columns: 11ch 20ch 16ch 16ch; /* time | event | "ALT  12345.6 km" | "VEL 12.34 km/s" */
       column-gap: 1ch;
       font-size: 15px;
       line-height: 22px;
@@ -1345,14 +1345,13 @@
     };
     let shownEvents = { id: null, count: 0 };
 
-    // gap: what goes between "T+" and the time (the big clock has none, the event rows a space)
-    function fmtMet(sec, gap = " ") {
+    function fmtMet(sec) {
       const sign = sec < 0 ? "-" : "+";
       let t = Math.floor(Math.abs(sec));
       const h = Math.floor(t / 3600); t -= h * 3600;
       const m = Math.floor(t / 60);
       const ss = t - m * 60;
-      return `T${sign}${gap}${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+      return `T${sign}${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
     }
 
     // Always shown. While something other than a spacecraft is selected, keep showing
@@ -1377,7 +1376,7 @@
       }
       const id = lastMission.id;
       missionCaptionEl.textContent = `FLIGHT EVENTS — ${lastMission.name}`;
-      metEl.textContent = fmtMet(data.currentTime - lastMission.launchTime, "");
+      metEl.textContent = fmtMet(data.currentTime - lastMission.launchTime);
 
       const log = lastMission.log;
       if (shownEvents.id !== id || shownEvents.count !== log.length) {
