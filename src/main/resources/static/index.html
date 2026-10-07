@@ -1019,14 +1019,28 @@
       ctx.restore();
     }
 
-    // A y-axis title rotated along the left (side < 0) or right (side > 0) edge
+    // Draws a tick number beside the plot on the left (side < 0) or right (side > 0) and
+    // remembers the widest one on each side, for drawYTitle
+    function drawYTick(c, text, side, y) {
+      const { ctx, fontPx, pad, pw } = c;
+      ctx.textAlign = side < 0 ? 'right' : 'left';
+      ctx.fillText(text, side < 0 ? pad.left - fontPx * 0.5 : pad.left + pw + fontPx * 0.5, y);
+      const key = side < 0 ? 'tickWidthLeft' : 'tickWidthRight';
+      c[key] = Math.max(c[key] ?? 0, ctx.measureText(text).width);
+    }
+
+    // A y-axis title rotated along the left (side < 0) or right (side > 0) edge, centred
+    // between the panel edge and that side's tick numbers so both gaps are equal
     function drawYTitle(c, text, color, side) {
-      const { ctx, w, fontPx, pad, ph } = c;
+      const { ctx, w, fontPx, pad, pw, ph } = c;
+      const x = side < 0
+        ? (pad.left - fontPx * 0.5 - (c.tickWidthLeft ?? 0)) / 2
+        : (pad.left + pw + fontPx * 0.5 + (c.tickWidthRight ?? 0) + w) / 2;
       ctx.save();
       ctx.font = `${Math.round(fontPx * 1.05)}px "Courier New", monospace`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.translate(side < 0 ? fontPx * 1.1 : w - fontPx * 1.1, pad.top + ph / 2);
+      ctx.translate(x, pad.top + ph / 2);
       ctx.rotate(-Math.PI / 2);
       ctx.fillStyle = color;
       ctx.fillText(text, 0, 0);
@@ -1083,11 +1097,9 @@
         ctx.strokeStyle = CHART_GRID_COLOR;
         ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + pw, y); ctx.stroke();
         ctx.fillStyle = CHART_ALT_COLOR;
-        ctx.textAlign = 'right';
-        ctx.fillText(String(Math.round(k * altScale.max / CHART_Y_DIVISIONS)), pad.left - fontPx * 0.5, y);
+        drawYTick(c, String(Math.round(k * altScale.max / CHART_Y_DIVISIONS)), -1, y);
         ctx.fillStyle = CHART_SPEED_COLOR;
-        ctx.textAlign = 'left';
-        ctx.fillText((k * speedScale.max / CHART_Y_DIVISIONS).toFixed(1), pad.left + pw + fontPx * 0.5, y);
+        drawYTick(c, (k * speedScale.max / CHART_Y_DIVISIONS).toFixed(1), 1, y);
       }
 
       drawKarmanLine(c, yAlt(CHART_KARMAN_KM));   // on the altitude (left) axis
@@ -1133,11 +1145,9 @@
         ctx.strokeStyle = CHART_GRID_COLOR;
         ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + pw, y); ctx.stroke();
         ctx.fillStyle = ORBIT_AP_COLOR;
-        ctx.textAlign = 'right';
-        ctx.fillText(String(Math.round(km)), pad.left - fontPx * 0.5, y);
+        drawYTick(c, String(Math.round(km)), -1, y);
         ctx.fillStyle = ORBIT_ECC_COLOR;
-        ctx.textAlign = 'left';
-        ctx.fillText((k / ORBIT_Y_DIVISIONS).toFixed(1), pad.left + pw + fontPx * 0.5, y);
+        drawYTick(c, (k / ORBIT_Y_DIVISIONS).toFixed(1), 1, y);
       }
 
       drawKarmanLine(c, yOf(CHART_KARMAN_KM));   // on the apoapsis (left) axis
