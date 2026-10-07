@@ -128,7 +128,6 @@
       line-height: 22px;
       white-space: pre;
     }
-    .event-row .ev-name { color: #7fcf9c; }
     .event-row .ev-num { color: rgba(255, 255, 255, 0.8); }
     .event-row.ev-new { animation: ev-flash 2.5s ease-out; }
     @keyframes ev-flash {
@@ -205,9 +204,8 @@
   <div id="data-feed"><div id="data-feed-text"></div></div>
 
   <div id="mission-panel">
-    <div class="mission-caption" id="mission-caption">MISSION ELAPSED TIME</div>
-    <div id="met">T+ 00:00:00</div>
-    <div class="mission-caption">FLIGHT EVENTS</div>
+    <div id="met">T+00:00:00</div>
+    <div class="mission-caption" id="mission-caption">FLIGHT EVENTS</div>
     <div id="event-log"></div>
   </div>
 
@@ -1337,13 +1335,14 @@
     };
     let shownEvents = { id: null, count: 0 };
 
-    function fmtMet(sec) {
+    // gap: what goes between "T+" and the time (the big clock has none, the event rows a space)
+    function fmtMet(sec, gap = " ") {
       const sign = sec < 0 ? "-" : "+";
       let t = Math.floor(Math.abs(sec));
       const h = Math.floor(t / 3600); t -= h * 3600;
       const m = Math.floor(t / 60);
       const ss = t - m * 60;
-      return `T${sign} ${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+      return `T${sign}${gap}${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
     }
 
     // Always shown. While something other than a spacecraft is selected, keep showing
@@ -1360,15 +1359,15 @@
         };
       }
       if (!lastMission || data.currentTime == null) {
-        missionCaptionEl.textContent = "MISSION ELAPSED TIME";
-        metEl.textContent = "T+ --:--:--";
+        missionCaptionEl.textContent = "FLIGHT EVENTS";
+        metEl.textContent = "T+--:--:--";
         eventLogEl.replaceChildren();
         shownEvents = { id: null, count: 0 };
         return;
       }
       const id = lastMission.id;
-      missionCaptionEl.textContent = `MISSION ELAPSED TIME — ${lastMission.name}`;
-      metEl.textContent = fmtMet(data.currentTime - lastMission.launchTime);
+      missionCaptionEl.textContent = `FLIGHT EVENTS — ${lastMission.name}`;
+      metEl.textContent = fmtMet(data.currentTime - lastMission.launchTime, "");
 
       const log = lastMission.log;
       if (shownEvents.id !== id || shownEvents.count !== log.length) {
@@ -1387,10 +1386,24 @@
           return row;
         }));
         shownEvents = { id, count: log.length };
-        // Once the rows overflow, keep the newest in view (the oldest go off the top)
-        eventLogEl.scrollTop = eventLogEl.scrollHeight;
+        scrollEventLog();
       }
     }
+
+    // Once the rows overflow, keep the newest in view: hide as many of the oldest rows as
+    // needed for the rest to fit whole, so no row is ever cut in half (any spare space is
+    // left at the bottom)
+    function scrollEventLog() {
+      const rows = [...eventLogEl.children];
+      for (const row of rows) row.style.display = "";
+      const rowHeight = rows[0]?.offsetHeight;
+      if (!rowHeight) return;
+      const style = getComputedStyle(eventLogEl);
+      const room = eventLogEl.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+      const hidden = Math.max(0, rows.length - Math.floor(room / rowHeight));
+      rows.slice(0, hidden).forEach(row => { row.style.display = "none"; });
+    }
+    window.addEventListener('resize', scrollEventLog);
 
     // ── Ground track map (top right) ─────────────────────────────────────────
     // Equirectangular world map (the globe's texture) with the night side shaded,
