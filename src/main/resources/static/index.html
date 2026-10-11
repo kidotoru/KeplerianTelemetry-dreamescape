@@ -738,6 +738,11 @@
     // All moves are gradual. The viewer may still drag / zoom meanwhile; the
     // automatic moves carry on regardless, easing the camera back onto its path
     // rather than snapping it there.
+    // The automatic camera takes priority: engageLaunchCamera re-checks every poll
+    // (not only when KSD's selection changes), so it starts as soon as the craft has a
+    // position, hands over to a new object KSD switches to mid-flight (stage separation)
+    // keeping the current pitch, and comes back after anything on the web page (a click,
+    // the craft briefly missing from a poll) has dropped it.
     // Distances are in scene units (1 unit = 1000 km).
     const LAUNCH_CAM_TOP_DIST  = 7.0; // camera distance at pitch 90° (straight above)
     const LAUNCH_CAM_SIDE_DIST = 3.0; // camera distance at pitch 0° (beside the trajectory)
@@ -798,10 +803,28 @@
       return true;
     }
 
+    // Called after every telemetry update: keep the launch camera on the spacecraft KSD
+    // has selected while it isn't in orbit
+    function engageLaunchCamera(data) {
+      const id = data.selectedId;
+      if (id == null || data.selectedInOrbit !== false || !spacecraft.some(o => o.id === id)) return;
+      selectedId = id;
+      if (launchCam?.id === id) return;
+      const st = craftState3(id);
+      if (!st) return;   // no position yet (e.g. just separated): try again on the next poll
+      if (launchCam && !launchCam.pulling) {
+        // KSD moved to another object mid-flight (stage separation): carry on from where the
+        // camera is, without resetting the pitch, following the new object from here
+        launchCam.id = id;
+        launchCam.last = st.pos.clone();
+        return;
+      }
+      startLaunchCamera(id);
+    }
+
     // Called after every telemetry update: follow the rocket and start pitching down above the threshold
     function updateLaunchCamera(inOrbit) {
       if (!launchCam) return;
-      if (selectedId !== launchCam.id) { launchCam = null; return; }
       const st = craftState3(launchCam.id);
       if (!st) return;
       // Follow the rocket until orbit insertion; after that the target heads for the Earth's centre
@@ -955,8 +978,9 @@
         if (ksdPick != null) {
           selectedId = ksdPick;
           // selectedInOrbit comes in the same response as selectedId, so it always describes this selection
+          // (a craft not yet in orbit is picked up by engageLaunchCamera below instead)
           const launching = ksdPick !== EARTH_MARKER_ID && data.selectedInOrbit === false;
-          if (!(launching && startLaunchCamera(ksdPick))) {
+          if (!launching) {
             focusOn(ksdPick);
           }
         }
@@ -967,6 +991,7 @@
         selectedId = earthObj ? EARTH_MARKER_ID : null;
       }
 
+      engageLaunchCamera(data);
       updateScene();
       updateLaunchCamera(data.selectedInOrbit);
       updateMissionPanel(data);
