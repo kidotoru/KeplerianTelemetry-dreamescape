@@ -141,6 +141,24 @@
     .station-row.station-head { color: rgba(255, 255, 255, 0.6); }   /* same font as the rows, so the ch columns line up */
     .station-row.station-head > span:not(:first-child) { text-align: center; }
 
+    /* ── Connection warning (top centre): shown while KSD isn't connected to the server ── */
+    #disconnected {
+      position: fixed;
+      top: calc(24 * var(--u));
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 20;
+      display: none;
+      padding: calc(8 * var(--u)) calc(28 * var(--u));
+      background: #d32f2f;
+      color: #ffffff;
+      font-family: "Courier New", monospace;
+      font-size: calc(36 * var(--u));
+      font-weight: bold;
+      letter-spacing: 0.12em;
+      pointer-events: none;
+    }
+
     /* ── Logo (top right) ── */
     #logo {
       position: fixed;
@@ -261,6 +279,8 @@
     <div class="mission-caption" id="mission-caption">FLIGHT EVENTS</div>
     <div id="event-log"></div>
   </div>
+
+  <div id="disconnected">DISCONNECTED</div>
 
   <img id="logo" src="img/logo.png" alt="Keplerian Space Discovery">
 
@@ -1779,14 +1799,22 @@
         const res  = await fetch("/api/objects");
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
+        showConnection(data.ksdConnected !== false);
         showDataFeed(data);
         await refreshOrbits(data.objects ?? []);
         await trackDone;
         render(data);
         await historyDone;
       } catch (e) {
+        showConnection(false);   // the server itself can't be reached
         console.warn(`[poll] ${e.message}`);
       }
+    }
+
+    // DISCONNECTED banner: while KSD isn't connected to the server (or the server is down)
+    const disconnectedEl = document.getElementById("disconnected");
+    function showConnection(connected) {
+      disconnectedEl.style.display = connected ? "none" : "block";
     }
 
     // Schedule the next poll only after the current one finishes, so slow

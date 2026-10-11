@@ -105,6 +105,7 @@ target\dist\KeplerianTelemetry\start.bat
 | 左下 | KSD で選択中の宇宙機の対地速度・高度のグラフ（後述） |
 | 下中央 | KSD で選択中の宇宙機の軌道を、位置・速度（状態ベクトル）から求める計算を 1 行ずつ流す表示（後述。高さは左右と同じで、幅は左下のグラフと右下の地図の間の残り） |
 | 右上 | ロゴ（`img/logo.png`） |
+| 中央上 | KSD がサーバに接続していない間（またはサーバに接続できない間）だけ、赤地に白字の `DISCONNECTED` を出す |
 | 右下 | 地上軌跡の世界地図（下端に選択中の機体の緯度・経度・高度。夜側の陰、射場などの地上施設、他の宇宙機、選択中の機体の通過済みの軌跡と予測軌跡。予測は現在の位置・速度から二体問題で 1 周回ぶん数値積分し、地球の自転を考慮） |
 
 左下のグラフ・左中段のグラフ・下中央の計算表示・右下の地図は同じ高さで、すべての枠が同じ半透明の背景。左上の枠だけは高さが固定でなく、その下の地上局の枠の上の残りを使う。
@@ -341,6 +342,7 @@ GET /api/objects?orbits=true
 
 ```json
 {
+  "ksdConnected": true,
   "currentTime": 1609459200,
   "selectedId": 3,
   "selectedInOrbit": null,
@@ -538,6 +540,7 @@ GET /api/objects/3?orbits=true
 
 | フィールド | 型 | 説明 |
 |---|---|---|
+| `ksdConnected` | boolean | KSD が WebSocket で接続中か |
 | `currentTime` | Long | 現在のシミュレーション時刻（Unix 秒） |
 | `selectedId` | Long \| null | KSD で選択中のオブジェクト ID。未選択なら `null` |
 | `selectedInOrbit` | Boolean \| null | 選択中の宇宙機が周回軌道上か（`selectedId` と同じ時点の値）。宇宙機以外の選択・未選択なら `null` |

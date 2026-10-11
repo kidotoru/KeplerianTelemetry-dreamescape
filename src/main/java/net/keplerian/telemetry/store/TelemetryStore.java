@@ -22,6 +22,20 @@ public class TelemetryStore {
     /** KSD で選択中の ID と、その宇宙機の状態（宇宙機以外なら null）。別々に読むと食い違いうるので1つにまとめて差し替える */
     public record Selection(Long id, SelectedState state) {}
     private volatile Selection selection = new Selection(null, null);
+    /** 接続中の KSD の WebSocket セッション数 */
+    private final java.util.concurrent.atomic.AtomicInteger ksdConnections = new java.util.concurrent.atomic.AtomicInteger();
+
+    public void ksdConnected() {
+        ksdConnections.incrementAndGet();
+    }
+
+    public void ksdDisconnected() {
+        ksdConnections.updateAndGet(n -> Math.max(0, n - 1));
+    }
+
+    public boolean isKsdConnected() {
+        return ksdConnections.get() > 0;
+    }
 
     public void setCurrentTime(long currentTime) {
         this.currentTime = currentTime;

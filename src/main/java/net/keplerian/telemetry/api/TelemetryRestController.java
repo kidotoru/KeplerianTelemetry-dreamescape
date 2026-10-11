@@ -42,7 +42,7 @@ public class TelemetryRestController {
         }
         TelemetryStore.Selection selection = store.getSelection();
         SelectedState state = selection.state();
-        return new TelemetryResponse(store.getCurrentTime(), selection.id(),
+        return new TelemetryResponse(store.isKsdConnected(), store.getCurrentTime(), selection.id(),
                 state != null ? state.inOrbit() : null,
                 state != null ? state.launchTime() : null,
                 state != null ? state.flightLog() : null,

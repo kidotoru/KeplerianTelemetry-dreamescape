@@ -50,6 +50,7 @@ public class KsdWebSocketHandler extends TextWebSocketHandler {
     @Override
     public void afterConnectionEstablished(@NonNull WebSocketSession session) throws Exception {
         sessions.add(session);
+        store.ksdConnected();
         log.info("KSD connected: {}", session.getId());
         send(session, QUERY_OBJECTS);
         log.debug("Sent QueryObjects to {}", session.getId());
@@ -122,7 +123,9 @@ public class KsdWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     public void afterConnectionClosed(@NonNull WebSocketSession session, @NonNull CloseStatus status) {
-        sessions.remove(session);
+        if (sessions.remove(session)) {
+            store.ksdDisconnected();
+        }
         log.info("KSD disconnected: {} ({})", session.getId(), status);
     }
 
