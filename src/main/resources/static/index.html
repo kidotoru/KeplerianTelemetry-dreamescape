@@ -318,6 +318,9 @@
       c.dampingFactor = 0.06;
       c.minDistance   = EARTH_RADIUS_FALLBACK * SCALE * 1.05;
       c.maxDistance   = 500;
+      // Same mouse operation as KSD: right drag rotates, middle drag pans, the wheel zooms.
+      // The left button is left to clicking markers and labels.
+      c.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE };
       return c;
     }
     let controls = createControls();
