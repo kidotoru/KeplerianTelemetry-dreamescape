@@ -1284,37 +1284,40 @@
     }
 
     // ── Calculation feed (bottom centre) ─────────────────────────────────────
-    // Works out the orbit of the spacecraft selected in KSD from its state vector
+    // Works out the orbit of each spacecraft orbiting the Earth from its state vector
     // (position and velocity relative to the Earth), one step per line, the way an
     // orbit determination would: r, v → specific energy → a, h → e → Ap / Pe / period.
     // A last line checks the result against the elements KSD computed itself.
     // Lines scroll upward at a steady rate; each time the lines queued below the
-    // panel run low, a new block is worked out from the latest telemetry. While no
-    // spacecraft orbiting the Earth is selected, the blocks go through every
-    // spacecraft orbiting the Earth in turn.
+    // panel run low, a new block is worked out from the latest telemetry, for the next
+    // spacecraft orbiting the Earth in ID order (all of them in turn, then round again).
     const dataFeedEl   = document.getElementById("data-feed");
     const dataFeedText = document.getElementById("data-feed-text");
     const DATA_FEED_LINE_INTERVAL = 0.2; // s per row (scroll speed)
     // Same gravitational constant and Earth mass as KSD, so the results match its elements
     const CALC_MU_EARTH = 6.67430e-11 * 5.972e24; // m^3/s^2
     let calcFeedData  = null;            // latest /api/objects response
-    let calcFeedCycle = 0;               // next spacecraft to show while none is selected
+    let calcFeedLastId = null;           // spacecraft shown in the previous block
     let dataFeedOffset = 0;              // px scrolled past the top of the first block
 
     function showDataFeed(data) {
       calcFeedData = data;
     }
 
-    // The KSD-selected spacecraft if it orbits the Earth, otherwise the next one in turn
+    // The next spacecraft orbiting the Earth after the one shown last, in ID order. Going
+    // by ID rather than by position in the list keeps the round intact when spacecraft
+    // appear or disappear (launches, stage separations).
     function calcFeedTarget() {
       const objs = calcFeedData?.objects ?? [];
       const earth = objs.find(o => o.id === EARTH_ID);
       if (!earth?.cart?.pos) return null;
-      const candidates = objs.filter(o => o.parentId === EARTH_ID && (o.type ?? "").trim().toLowerCase() === "spacecraft" && o.cart?.pos && o.cart?.vel);
-      const selected = candidates.find(o => o.id === lastMission?.id);
-      if (selected) return { earth, craft: selected };
+      const candidates = objs
+        .filter(o => o.parentId === EARTH_ID && (o.type ?? "").trim().toLowerCase() === "spacecraft" && o.cart?.pos && o.cart?.vel)
+        .sort((a, b) => a.id - b.id);
       if (!candidates.length) return null;
-      return { earth, craft: candidates[calcFeedCycle++ % candidates.length] };
+      const craft = candidates.find(o => calcFeedLastId == null || o.id > calcFeedLastId) ?? candidates[0];
+      calcFeedLastId = craft.id;
+      return { earth, craft };
     }
 
     const fmtFixed = (v, d) => Number.isFinite(v) ? v.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d }) : "—";
